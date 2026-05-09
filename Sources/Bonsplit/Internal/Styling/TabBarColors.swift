@@ -141,6 +141,10 @@ enum TabBarColors {
         isPressed ? nsColorActiveText(for: appearance) : nsColorInactiveText(for: appearance)
     }
 
+    static func splitActionIconActive(for appearance: BonsplitConfiguration.Appearance) -> Color {
+        Color(nsColor: nsColorActiveText(for: appearance))
+    }
+
     // MARK: - Borders & Indicators
 
     static var separator: Color {

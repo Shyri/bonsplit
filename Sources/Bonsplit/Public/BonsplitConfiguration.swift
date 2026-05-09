@@ -105,21 +105,36 @@ extension BonsplitConfiguration {
     public struct SplitButtonTooltips: Sendable, Equatable {
         public var newTerminal: String
         public var newBrowser: String
+        public var newClaudeChat: String
         public var splitRight: String
         public var splitDown: String
+        public var toggleNotes: String
+        public var openInFinder: String
+        public var openInIntelliJ: String
+        public var openInAndroidStudio: String
 
         public static let `default` = SplitButtonTooltips()
 
         public init(
             newTerminal: String = "New Terminal",
             newBrowser: String = "New Browser",
+            newClaudeChat: String = "New Claude Chat",
             splitRight: String = "Split Right",
-            splitDown: String = "Split Down"
+            splitDown: String = "Split Down",
+            toggleNotes: String = "Toggle Notes",
+            openInFinder: String = "Open in Finder",
+            openInIntelliJ: String = "Open in IntelliJ IDEA",
+            openInAndroidStudio: String = "Open in Android Studio"
         ) {
             self.newTerminal = newTerminal
             self.newBrowser = newBrowser
+            self.newClaudeChat = newClaudeChat
             self.splitRight = splitRight
             self.splitDown = splitDown
+            self.toggleNotes = toggleNotes
+            self.openInFinder = openInFinder
+            self.openInIntelliJ = openInIntelliJ
+            self.openInAndroidStudio = openInAndroidStudio
         }
     }
 
@@ -175,6 +190,36 @@ extension BonsplitConfiguration {
         /// When true, split buttons are only visible on hover
         public var splitButtonsOnHover: Bool
 
+        /// Whether to show a notes-toggle button alongside the split buttons.
+        /// When true, consumers receive a delegate callback on click.
+        public var showNotesButton: Bool
+
+        /// Whether the notes-toggle button is currently in the "on" (highlighted) state.
+        /// Consumers set this to reflect the current visibility of their notes sidebar.
+        public var notesButtonActive: Bool
+
+        /// Whether to show a "New Claude Chat" button alongside the split buttons.
+        /// When true, clicking dispatches `requestNewTab(kind: "claudeChat", ...)`
+        /// to the configured delegate.
+        public var showClaudeChatButton: Bool
+
+        /// Whether to show an "Open in Finder" button alongside the split buttons.
+        public var showOpenInFinderButton: Bool
+
+        /// Whether to show an "Open in IDE" button alongside the split buttons.
+        /// The icon and action depend on `openInIDEKind`.
+        public var showOpenInIDEButton: Bool
+
+        /// Which IDE the open-in-IDE button currently targets. Expected values:
+        /// `"intellij"` or `"androidStudio"`. Consumers set this dynamically based
+        /// on the current working directory (e.g. presence of `build.gradle`).
+        public var openInIDEKind: String?
+
+        /// Whether the open-in-Finder/IDE buttons are currently enabled.
+        /// Consumers set this to `false` when the resolved working directory does
+        /// not exist on disk so the buttons are dimmed.
+        public var openButtonsEnabled: Bool
+
         /// Extra leading inset for the tab bar (e.g. for traffic light buttons when sidebar is collapsed)
         public var tabBarLeadingInset: CGFloat
 
@@ -225,6 +270,13 @@ extension BonsplitConfiguration {
             minimumPaneHeight: CGFloat = 100,
             showSplitButtons: Bool = true,
             splitButtonsOnHover: Bool = false,
+            showNotesButton: Bool = false,
+            notesButtonActive: Bool = false,
+            showClaudeChatButton: Bool = false,
+            showOpenInFinderButton: Bool = false,
+            showOpenInIDEButton: Bool = false,
+            openInIDEKind: String? = nil,
+            openButtonsEnabled: Bool = true,
             tabBarLeadingInset: CGFloat = 0,
             splitButtonTooltips: SplitButtonTooltips = .default,
             animationDuration: Double = 0.15,
@@ -240,6 +292,13 @@ extension BonsplitConfiguration {
             self.minimumPaneHeight = minimumPaneHeight
             self.showSplitButtons = showSplitButtons
             self.splitButtonsOnHover = splitButtonsOnHover
+            self.showNotesButton = showNotesButton
+            self.notesButtonActive = notesButtonActive
+            self.showClaudeChatButton = showClaudeChatButton
+            self.showOpenInFinderButton = showOpenInFinderButton
+            self.showOpenInIDEButton = showOpenInIDEButton
+            self.openInIDEKind = openInIDEKind
+            self.openButtonsEnabled = openButtonsEnabled
             self.tabBarLeadingInset = tabBarLeadingInset
             self.splitButtonTooltips = splitButtonTooltips
             self.animationDuration = animationDuration

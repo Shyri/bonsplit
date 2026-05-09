@@ -165,6 +165,22 @@ public final class BonsplitController {
         delegate?.splitTabBar(self, didRequestTabContextAction: action, for: tab, inPane: pane)
     }
 
+    /// Notify the delegate that the user clicked the notes-toggle button in a pane's tab bar.
+    public func requestToggleNotes(inPane pane: PaneID) {
+        delegate?.splitTabBar(self, didRequestToggleNotesInPane: pane)
+    }
+
+    /// Notify the delegate that the user clicked the open-in-Finder button in a pane's tab bar.
+    public func requestOpenInFinder(inPane pane: PaneID) {
+        delegate?.splitTabBar(self, didRequestOpenInFinderInPane: pane)
+    }
+
+    /// Notify the delegate that the user clicked the open-in-IDE button in a pane's tab bar.
+    /// `kind` is the value of `configuration.appearance.openInIDEKind` at click time.
+    public func requestOpenInIDE(inPane pane: PaneID, kind: String?) {
+        delegate?.splitTabBar(self, didRequestOpenInIDEInPane: pane, kind: kind)
+    }
+
     /// Update an existing tab's metadata
     /// - Parameters:
     ///   - tabId: The tab to update

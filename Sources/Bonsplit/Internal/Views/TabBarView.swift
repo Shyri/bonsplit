@@ -87,6 +87,18 @@ struct TabBarView: View {
         return scrollOffset < tabsWidth - containerWidth
     }
 
+    /// Width of the trailing button cluster's opaque backdrop. The base 114pt
+    /// fits the four built-in buttons (terminal, browser, split-right, split-down);
+    /// each optional button adds another ~26pt to keep visuals consistent.
+    private var splitButtonsBackdropWidth: CGFloat {
+        var width: CGFloat = 114
+        let app = controller.configuration.appearance
+        if app.showNotesButton { width += 26 }
+        if app.showOpenInFinderButton { width += 26 }
+        if app.showOpenInIDEButton { width += 26 }
+        return width
+    }
+
     /// Whether this tab bar should show full saturation (focused or drag source)
     private var shouldShowFullSaturation: Bool {
         isFocused || splitViewController.dragSourcePaneId == pane.id
@@ -125,7 +137,7 @@ struct TabBarView: View {
                             dropZoneAfterTabs
                         }
                         .padding(.horizontal, TabBarMetrics.barPadding)
-                        .padding(.trailing, showSplitButtons ? 114 : 0)
+                        .padding(.trailing, showSplitButtons ? splitButtonsBackdropWidth : 0)
                         .animation(nil, value: pane.tabs.map(\.id))
                         .background(
                             GeometryReader { contentGeo in
@@ -208,7 +220,7 @@ struct TabBarView: View {
                                 .frame(width: 24)
                                 Rectangle().fill(backdropColor)
                             }
-                            .frame(width: 114)
+                            .frame(width: splitButtonsBackdropWidth)
 
                             splitButtons
                                 .saturation(tabBarSaturation)
@@ -494,6 +506,13 @@ struct TabBarView: View {
     @ViewBuilder
     private var splitButtons: some View {
         let tooltips = controller.configuration.appearance.splitButtonTooltips
+        let showNotesButton = controller.configuration.appearance.showNotesButton
+        let notesButtonActive = controller.configuration.appearance.notesButtonActive
+        let showClaudeChatButton = controller.configuration.appearance.showClaudeChatButton
+        let showOpenInFinderButton = controller.configuration.appearance.showOpenInFinderButton
+        let showOpenInIDEButton = controller.configuration.appearance.showOpenInIDEButton
+        let openInIDEKind = controller.configuration.appearance.openInIDEKind
+        let openButtonsEnabled = controller.configuration.appearance.openButtonsEnabled
         HStack(spacing: 4) {
             Button {
                 controller.requestNewTab(kind: "terminal", inPane: pane.id)
@@ -512,6 +531,17 @@ struct TabBarView: View {
             }
             .buttonStyle(SplitActionButtonStyle(appearance: appearance))
             .safeHelp(tooltips.newBrowser)
+
+            if showClaudeChatButton {
+                Button {
+                    controller.requestNewTab(kind: "claudeChat", inPane: pane.id)
+                } label: {
+                    Image(systemName: "bubble.left.and.bubble.right")
+                        .font(.system(size: 12))
+                }
+                .buttonStyle(SplitActionButtonStyle(appearance: appearance))
+                .safeHelp(tooltips.newClaudeChat)
+            }
 
             Button {
                 // 120fps animation handled by SplitAnimator
@@ -532,6 +562,44 @@ struct TabBarView: View {
             }
             .buttonStyle(SplitActionButtonStyle(appearance: appearance))
             .safeHelp(tooltips.splitDown)
+
+            if showOpenInFinderButton {
+                Button {
+                    controller.requestOpenInFinder(inPane: pane.id)
+                } label: {
+                    Image(systemName: "folder")
+                        .font(.system(size: 12))
+                }
+                .buttonStyle(SplitActionButtonStyle(appearance: appearance))
+                .safeHelp(tooltips.openInFinder)
+                .disabled(!openButtonsEnabled)
+                .opacity(openButtonsEnabled ? 1 : 0.45)
+            }
+
+            if showOpenInIDEButton {
+                let isAndroid = (openInIDEKind == "androidStudio")
+                Button {
+                    controller.requestOpenInIDE(inPane: pane.id, kind: openInIDEKind)
+                } label: {
+                    Image(systemName: isAndroid ? "hammer" : "curlybraces")
+                        .font(.system(size: 12))
+                }
+                .buttonStyle(SplitActionButtonStyle(appearance: appearance))
+                .safeHelp(isAndroid ? tooltips.openInAndroidStudio : tooltips.openInIntelliJ)
+                .disabled(!openButtonsEnabled)
+                .opacity(openButtonsEnabled ? 1 : 0.45)
+            }
+
+            if showNotesButton {
+                Button {
+                    controller.requestToggleNotes(inPane: pane.id)
+                } label: {
+                    Image(systemName: "note.text")
+                        .font(.system(size: 12))
+                }
+                .buttonStyle(SplitActionButtonStyle(appearance: appearance, isActive: notesButtonActive))
+                .safeHelp(tooltips.toggleNotes)
+            }
         }
         .padding(.leading, 6)
         .padding(.trailing, 8)
@@ -677,10 +745,15 @@ struct TabBarView: View {
 
 private struct SplitActionButtonStyle: ButtonStyle {
     let appearance: BonsplitConfiguration.Appearance
+    var isActive: Bool = false
 
     func makeBody(configuration: Configuration) -> some View {
         configuration.label
-            .foregroundStyle(TabBarColors.splitActionIcon(for: appearance, isPressed: configuration.isPressed))
+            .foregroundStyle(
+                isActive
+                    ? AnyShapeStyle(TabBarColors.splitActionIconActive(for: appearance))
+                    : AnyShapeStyle(TabBarColors.splitActionIcon(for: appearance, isPressed: configuration.isPressed))
+            )
     }
 }
 

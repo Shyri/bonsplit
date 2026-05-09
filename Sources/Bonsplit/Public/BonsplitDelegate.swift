@@ -58,6 +58,20 @@ public protocol BonsplitDelegate: AnyObject {
     /// Called when the user triggers an action from a tab's context menu.
     func splitTabBar(_ controller: BonsplitController, didRequestTabContextAction action: TabContextAction, for tab: Tab, inPane pane: PaneID)
 
+    /// Called when the user clicks the notes-toggle button in a tab bar.
+    /// Only emitted when `appearance.showNotesButton` is enabled.
+    func splitTabBar(_ controller: BonsplitController, didRequestToggleNotesInPane pane: PaneID)
+
+    /// Called when the user clicks the open-in-Finder button in a tab bar.
+    /// Only emitted when `appearance.showOpenInFinderButton` is enabled.
+    func splitTabBar(_ controller: BonsplitController, didRequestOpenInFinderInPane pane: PaneID)
+
+    /// Called when the user clicks the open-in-IDE button in a tab bar.
+    /// `kind` is the value of `appearance.openInIDEKind` at click time
+    /// (e.g. `"intellij"` or `"androidStudio"`). Only emitted when
+    /// `appearance.showOpenInIDEButton` is enabled.
+    func splitTabBar(_ controller: BonsplitController, didRequestOpenInIDEInPane pane: PaneID, kind: String?)
+
     // MARK: - Geometry
 
     /// Called when any pane geometry changes (resize, split, close)
@@ -83,6 +97,9 @@ public extension BonsplitDelegate {
     func splitTabBar(_ controller: BonsplitController, didFocusPane pane: PaneID) {}
     func splitTabBar(_ controller: BonsplitController, didRequestNewTab kind: String, inPane pane: PaneID) {}
     func splitTabBar(_ controller: BonsplitController, didRequestTabContextAction action: TabContextAction, for tab: Tab, inPane pane: PaneID) {}
+    func splitTabBar(_ controller: BonsplitController, didRequestToggleNotesInPane pane: PaneID) {}
+    func splitTabBar(_ controller: BonsplitController, didRequestOpenInFinderInPane pane: PaneID) {}
+    func splitTabBar(_ controller: BonsplitController, didRequestOpenInIDEInPane pane: PaneID, kind: String?) {}
     func splitTabBar(_ controller: BonsplitController, didChangeGeometry snapshot: LayoutSnapshot) {}
     func splitTabBar(_ controller: BonsplitController, shouldNotifyDuringDrag: Bool) -> Bool { false }
 }
