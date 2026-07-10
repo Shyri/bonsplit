@@ -8,6 +8,7 @@ final class PaneOwnershipIndexTests: XCTestCase {
             configuration: BonsplitConfiguration(newTabPosition: .end)
         )
         let paneId = try! XCTUnwrap(controller.focusedPaneId)
+        let welcomeTabId = try! XCTUnwrap(controller.tabs(inPane: paneId).only?.id)
         let firstTabId = try! XCTUnwrap(controller.createTab(title: "First"))
         let secondTabId = try! XCTUnwrap(controller.createTab(title: "Second"))
 
@@ -21,6 +22,60 @@ final class PaneOwnershipIndexTests: XCTestCase {
 
         XCTAssertEqual(controller.selectedTabId(inPane: paneId), firstTabId)
         XCTAssertEqual(controller.selectedTab(inPane: paneId)?.id, firstTabId)
+
+        XCTAssertTrue(controller.moveTab(firstTabId, toPane: paneId, atIndex: 3))
+        XCTAssertEqual(
+            paneState.tabs.map(\.id),
+            [welcomeTabId.uuid, secondTabId.uuid, firstTabId.uuid]
+        )
+        XCTAssertEqual(controller.paneId(containing: firstTabId), paneId)
+        XCTAssertEqual(controller.selectedTabId(inPane: paneId), firstTabId)
+
+        let firstTabItem = try! XCTUnwrap(paneState.tabs.first { $0.id == firstTabId.uuid })
+        controller.internalController.moveTab(
+            firstTabItem,
+            from: paneId,
+            to: paneId,
+            atIndex: 0
+        )
+        XCTAssertEqual(
+            paneState.tabs.map(\.id),
+            [firstTabId.uuid, welcomeTabId.uuid, secondTabId.uuid]
+        )
+        XCTAssertEqual(controller.paneId(containing: firstTabId), paneId)
+        XCTAssertEqual(controller.selectedTabId(inPane: paneId), firstTabId)
+
+        XCTAssertTrue(controller.closeTab(firstTabId))
+        XCTAssertNil(controller.paneId(containing: firstTabId))
+        XCTAssertEqual(controller.selectedTabId(inPane: paneId), welcomeTabId)
+    }
+
+    @MainActor
+    func testSplitVariantsIndexEmptyAndInsertedPanes() {
+        let controller = BonsplitController()
+        let originalPaneId = try! XCTUnwrap(controller.focusedPaneId)
+
+        let emptyPaneId = try! XCTUnwrap(
+            controller.splitPane(originalPaneId, orientation: .vertical)
+        )
+        XCTAssertNil(controller.selectedTabId(inPane: emptyPaneId))
+
+        let emptyPaneTabId = try! XCTUnwrap(
+            controller.createTab(title: "Empty pane tab", inPane: emptyPaneId)
+        )
+        XCTAssertEqual(controller.paneId(containing: emptyPaneTabId), emptyPaneId)
+
+        let insertedTab = Tab(title: "Inserted first")
+        let insertedPaneId = try! XCTUnwrap(
+            controller.splitPane(
+                originalPaneId,
+                orientation: .horizontal,
+                withTab: insertedTab,
+                insertFirst: true
+            )
+        )
+        XCTAssertEqual(controller.paneId(containing: insertedTab.id), insertedPaneId)
+        XCTAssertEqual(controller.selectedTabId(inPane: insertedPaneId), insertedTab.id)
     }
 
     @MainActor
@@ -102,7 +157,7 @@ final class PaneOwnershipIndexTests: XCTestCase {
     }
 
     @MainActor
-    func testReplacingRestoredTreeRebuildsIndexesAndRepairsFocusAndZoom() {
+    func testRestoredTreeBootstrapsIndexesAndRejectsInvalidFocus() {
         let leftTab = TabItem(title: "Left")
         let rightTab = TabItem(title: "Right")
         let leftPane = PaneState(tabs: [leftTab])
@@ -120,15 +175,15 @@ final class PaneOwnershipIndexTests: XCTestCase {
         XCTAssertEqual(controller.paneId(containing: rightTab.id), rightPane.id)
         controller.focusPane(rightPane.id)
         XCTAssertTrue(controller.togglePaneZoom(rightPane.id))
+        controller.focusPane(PaneID())
 
-        let replacementTab = TabItem(title: "Replacement")
-        let replacementPane = PaneState(tabs: [replacementTab])
-        controller.replaceRootNode(.pane(replacementPane))
+        XCTAssertEqual(controller.focusedPaneId, rightPane.id)
+        XCTAssertEqual(controller.zoomedPaneId, rightPane.id)
 
-        XCTAssertNil(controller.paneId(containing: leftTab.id))
+        controller.closePane(rightPane.id)
         XCTAssertNil(controller.paneId(containing: rightTab.id))
-        XCTAssertEqual(controller.paneId(containing: replacementTab.id), replacementPane.id)
-        XCTAssertEqual(controller.focusedPaneId, replacementPane.id)
+        XCTAssertEqual(controller.paneId(containing: leftTab.id), leftPane.id)
+        XCTAssertEqual(controller.focusedPaneId, leftPane.id)
         XCTAssertNil(controller.zoomedPaneId)
     }
 }
