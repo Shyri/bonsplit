@@ -853,7 +853,18 @@ struct SplitContainerView<Content: View, EmptyContent: View>: NSViewRepresentabl
                 // would ever retry — panes would sit wedged at the refused
                 // layout. Bounded by explicit calls, so it cannot spin.
                 let renudged = lastImposedEpoch != splitState.imposedEpoch
-                if renudged || retargeted || (moved && abs(current - target) > 0.01) {
+                // Never apply when the divider already sits at the target:
+                // a same-position setPosition still runs a layout pass,
+                // which re-applies surface sizes, which re-imposes — a
+                // sustained once-per-turn churn loop at full CPU. Renudge
+                // and retarget only bypass the refusal memo; distance from
+                // the target is what justifies touching AppKit.
+                if abs(current - target) <= 0.01 {
+                    lastImposedTarget = target
+                    lastImposedEpoch = splitState.imposedEpoch
+                    lastImposedOutcome = current
+                    imposedRetryBudget = 0
+                } else if renudged || retargeted || moved {
                     setPositionSafely(target, in: splitView, layout: true)
                     lastImposedTarget = target
                     lastImposedEpoch = splitState.imposedEpoch
