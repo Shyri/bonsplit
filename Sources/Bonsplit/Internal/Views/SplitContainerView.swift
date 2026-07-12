@@ -298,6 +298,22 @@ struct SplitContainerView<Content: View, EmptyContent: View>: NSViewRepresentabl
             context.coordinator.didApplyInitialDividerPosition = true
             context.coordinator.initialDividerApplyAttempts = 0
 
+            // A fresh view initializes from the strongest authority, same
+            // rule syncPosition applies on every pass: an imposed extent is
+            // exact points and wins over the mirrored-back fraction, which
+            // reconstructs those points only approximately (clamping and a
+            // changed available size skew it). Initializing from the
+            // fraction seeded a divider a half-cell or more off its imposed
+            // target, and every subsequent pass fought over the difference.
+            if splitState.imposedFirstExtent != nil {
+                context.coordinator.syncPosition(splitState.dividerPosition, in: splitView)
+                if animationOrigin != nil, shouldAnimate {
+                    splitView.arrangedSubviews.indices.forEach { splitView.arrangedSubviews[$0].isHidden = false }
+                    context.coordinator.isAnimating = false
+                }
+                return
+            }
+
             if animationOrigin != nil {
                 let targetDividerPosition = min(
                     max(splitState.dividerPosition, dividerPositionRange.lowerBound),
@@ -788,6 +804,20 @@ struct SplitContainerView<Content: View, EmptyContent: View>: NSViewRepresentabl
         }
 
         func setPositionSafely(_ position: CGFloat, in splitView: NSSplitView, layout: Bool = true) {
+#if DEBUG
+            // Wobble hunt: name every divider write while an imposition is
+            // active. The imposed target and a fraction-derived recompute
+            // disagree by ~half a cell, and two writers alternating is a
+            // divider flapping every frame at settle.
+            if splitState.imposedFirstExtent != nil {
+                let caller = Thread.callStackSymbols.dropFirst(1).prefix(3).joined(separator: " | ")
+                dlog(
+                    "split.setPosition split=\(String(splitState.id.uuidString.prefix(5)))"
+                        + " px=\(Int(position)) imposed=\(Int(splitState.imposedFirstExtent ?? -1))"
+                        + " \(caller)"
+                )
+            }
+#endif
             isSyncingProgrammatically = true
             splitContainerProgrammaticSyncDepth += 1
             defer {
