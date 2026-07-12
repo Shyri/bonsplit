@@ -1000,6 +1000,7 @@ public final class BonsplitController {
             internalController.isExternalUpdateInProgress = true
         }
         split.imposedFirstExtent = extent.map { max(0, $0) }
+        split.imposedEpoch &+= 1
         if fromExternal {
             DispatchQueue.main.asyncAfter(deadline: .now() + 0.05) { [weak self] in
                 self?.internalController.isExternalUpdateInProgress = false

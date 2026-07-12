@@ -433,8 +433,12 @@ struct SplitContainerView<Content: View, EmptyContent: View>: NSViewRepresentabl
         }
 
         // Access dividerPosition (and the imposed extent) so SwiftUI tracks
-        // them as dependencies, then sync if either changed externally.
+        // them as dependencies, then sync if either changed externally. The
+        // epoch must be read too: re-imposing an UNCHANGED extent bumps only
+        // the epoch, and without this read nothing invalidates the view, so
+        // syncPosition — where the refused-target retry lives — never runs.
         _ = splitState.imposedFirstExtent
+        _ = splitState.imposedEpoch
         let currentPosition = splitState.dividerPosition
         context.coordinator.syncPosition(currentPosition, in: splitView)
 
@@ -568,6 +572,9 @@ struct SplitContainerView<Content: View, EmptyContent: View>: NSViewRepresentabl
         /// loop against a target AppKit's constraints refuse to reach.
         var lastImposedTarget: CGFloat?
         var lastImposedOutcome: CGFloat?
+        var lastImposedEpoch: Int?
+        var imposedRetryBudget = 0
+        weak var imposedRetrySplitView: NSSplitView?
         // Guard programmatic `setPosition` re-entrancy from resize callbacks.
         var isSyncingProgrammatically = false
         /// Track if user is actively dragging the divider
@@ -617,6 +624,8 @@ struct SplitContainerView<Content: View, EmptyContent: View>: NSViewRepresentabl
                 lastAppliedPosition = newState.dividerPosition
                 lastImposedTarget = nil
                 lastImposedOutcome = nil
+                lastImposedEpoch = nil
+                imposedRetryBudget = 0
                 didApplyInitialDividerPosition = false
                 initialDividerApplyAttempts = 0
                 isAnimating = false
@@ -712,6 +721,49 @@ struct SplitContainerView<Content: View, EmptyContent: View>: NSViewRepresentabl
         }
 #endif
         /// Apply external position changes to the NSSplitView
+        /// One deferred retry per runloop turn for an imposed target AppKit
+        /// refused (see the imposed path in `syncPosition`). Deliberately
+        /// NOT measurement-driven layout-pass re-assertion — that spins the
+        /// main thread when a target is unreachable; this runs at most
+        /// `imposedRetryBudget` times per imposition and stops the moment
+        /// the outcome matches.
+        private func scheduleImposedRetry() {
+            DispatchQueue.main.async { [weak self] in
+                self?.retryImposedIfStillShort()
+            }
+        }
+
+        private func retryImposedIfStillShort() {
+            guard imposedRetryBudget > 0,
+                  let splitView = imposedRetrySplitView,
+                  let imposed = splitState.imposedFirstExtent,
+                  splitView.arrangedSubviews.count >= 2
+            else { return }
+            imposedRetryBudget -= 1
+            let target = clampedDividerPosition(imposed, in: splitView)
+            let current = splitState.orientation == .horizontal
+                ? splitView.arrangedSubviews[0].frame.width
+                : splitView.arrangedSubviews[0].frame.height
+            guard abs(current - target) > 0.01 else {
+                imposedRetryBudget = 0
+                return
+            }
+            setPositionSafely(target, in: splitView, layout: true)
+            lastImposedOutcome = splitState.orientation == .horizontal
+                ? splitView.arrangedSubviews[0].frame.width
+                : splitView.arrangedSubviews[0].frame.height
+#if DEBUG
+            dlog(
+                "bonsplit.impose.retry split=\(String(splitState.id.uuidString.prefix(5)))"
+                    + " target=\(Int(target)) outcome=\(Int(lastImposedOutcome ?? -1))"
+                    + " budget=\(imposedRetryBudget)"
+            )
+#endif
+            if abs((lastImposedOutcome ?? target) - target) > 0.01 {
+                scheduleImposedRetry()
+            }
+        }
+
         func setPositionSafely(_ position: CGFloat, in splitView: NSSplitView, layout: Bool = true) {
             isSyncingProgrammatically = true
             splitContainerProgrammaticSyncDepth += 1
@@ -771,12 +823,42 @@ struct SplitContainerView<Content: View, EmptyContent: View>: NSViewRepresentabl
                 // something ELSE moved the divider off our last outcome.
                 let moved = abs(current - (lastImposedOutcome ?? .infinity)) > 0.01
                 let retargeted = abs(target - (lastImposedTarget ?? .infinity)) > 0.01
-                if retargeted || (moved && abs(current - target) > 0.01) {
+                // A fresh imposition call re-arms one apply attempt even for
+                // an identical target: AppKit may have refused this exact
+                // target earlier (transient pane minimums mid-churn), and
+                // with neither target nor divider moving since, nothing else
+                // would ever retry — panes would sit wedged at the refused
+                // layout. Bounded by explicit calls, so it cannot spin.
+                let renudged = lastImposedEpoch != splitState.imposedEpoch
+                if renudged || retargeted || (moved && abs(current - target) > 0.01) {
                     setPositionSafely(target, in: splitView, layout: true)
                     lastImposedTarget = target
+                    lastImposedEpoch = splitState.imposedEpoch
                     lastImposedOutcome = splitState.orientation == .horizontal
                         ? splitView.arrangedSubviews[0].frame.width
                         : splitView.arrangedSubviews[0].frame.height
+#if DEBUG
+                    dlog(
+                        "bonsplit.impose split=\(String(splitState.id.uuidString.prefix(5)))"
+                            + " target=\(Int(target)) outcome=\(Int(lastImposedOutcome ?? -1))"
+                            + " avail=\(Int(available)) renudged=\(renudged ? 1 : 0)"
+                            + " retargeted=\(retargeted ? 1 : 0) moved=\(moved ? 1 : 0)"
+                    )
+#endif
+                    // A refused apply (AppKit clamped against constraints
+                    // that are usually stale mid-churn bounds) gets a few
+                    // deferred retries, one per runloop turn: a turn later
+                    // AppKit has finished the layout pass that made the
+                    // target feasible. The budget makes it finite when the
+                    // target genuinely cannot fit; every fresh imposition
+                    // resets it.
+                    if abs((lastImposedOutcome ?? target) - target) > 0.01 {
+                        imposedRetryBudget = 5
+                        imposedRetrySplitView = splitView
+                        scheduleImposedRetry()
+                    } else {
+                        imposedRetryBudget = 0
+                    }
                 }
                 let mirrored = target / available
                 if abs(splitState.dividerPosition - mirrored) > 0.000_1 {

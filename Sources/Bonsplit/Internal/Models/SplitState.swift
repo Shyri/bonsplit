@@ -25,6 +25,12 @@ final class SplitState: Identifiable {
     /// every fraction reader stays coherent. A user divider drag clears it:
     /// the gesture takes ownership and fraction semantics resume.
     var imposedFirstExtent: CGFloat?
+    /// Bumped on every explicit imposition call. The view's convergence memo
+    /// keys off this so a re-imposed target gets exactly one fresh apply
+    /// attempt even when neither the target nor the divider has moved —
+    /// AppKit may have refused the same target earlier (transient pane
+    /// minimums mid-churn) and the refusal is not permanent.
+    var imposedEpoch: Int = 0
 
     /// Animation origin for entry animation (nil = no animation needed)
     var animationOrigin: SplitAnimationOrigin?
