@@ -31,6 +31,13 @@ final class SplitState: Identifiable {
     /// AppKit may have refused the same target earlier (transient pane
     /// minimums mid-churn) and the refusal is not permanent.
     var imposedEpoch: Int = 0
+    /// Imperative hook the live split view's coordinator installs so an
+    /// imposition applies IMMEDIATELY. Routing impositions through SwiftUI
+    /// observation is not reliable for representables: a split whose only
+    /// change is a re-imposed extent may never get another updateNSView,
+    /// and its divider then renders a previous layout until some unrelated
+    /// event nudges it. Weakly captured internals; safe to call when stale.
+    @ObservationIgnored var applyImposedNow: (() -> Void)?
 
     /// Animation origin for entry animation (nil = no animation needed)
     var animationOrigin: SplitAnimationOrigin?

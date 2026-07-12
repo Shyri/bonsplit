@@ -439,6 +439,28 @@ struct SplitContainerView<Content: View, EmptyContent: View>: NSViewRepresentabl
         // syncPosition — where the refused-target retry lives — never runs.
         _ = splitState.imposedFirstExtent
         _ = splitState.imposedEpoch
+        // Imperative imposition path: the controller calls this the moment
+        // an extent is imposed, so a split whose ONLY change is the imposed
+        // extent applies immediately instead of waiting for a SwiftUI
+        // update that may never come (representables are not reliably
+        // re-updated for observation-only changes).
+        splitState.applyImposedNow = { [weak coordinator = context.coordinator, weak splitView] in
+            guard let coordinator else { return }
+            // One coalesced apply on the NEXT runloop turn. Synchronous
+            // application from inside the caller's plan pass re-enters
+            // layout (impose -> layout -> geometry callback -> replan ->
+            // impose ...) and can pin the main thread; a deferred turn
+            // breaks the cycle while keeping the apply immediate enough
+            // that no settle poll ever sees a stale divider.
+            guard !coordinator.imposedApplyPending else { return }
+            coordinator.imposedApplyPending = true
+            DispatchQueue.main.async { [weak coordinator, weak splitView] in
+                guard let coordinator else { return }
+                coordinator.imposedApplyPending = false
+                guard let splitView else { return }
+                coordinator.syncPosition(coordinator.splitState.dividerPosition, in: splitView)
+            }
+        }
         let currentPosition = splitState.dividerPosition
         context.coordinator.syncPosition(currentPosition, in: splitView)
 
@@ -574,6 +596,7 @@ struct SplitContainerView<Content: View, EmptyContent: View>: NSViewRepresentabl
         var lastImposedOutcome: CGFloat?
         var lastImposedEpoch: Int?
         var imposedRetryBudget = 0
+        var imposedApplyPending = false
         weak var imposedRetrySplitView: NSSplitView?
         // Guard programmatic `setPosition` re-entrancy from resize callbacks.
         var isSyncingProgrammatically = false
