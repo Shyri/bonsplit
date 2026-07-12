@@ -941,6 +941,7 @@ public final class BonsplitController {
                 id: splitState.id.uuidString,
                 orientation: splitState.orientation == .horizontal ? "horizontal" : "vertical",
                 dividerPosition: Double(splitState.dividerPosition),
+                imposedFirstExtent: splitState.imposedFirstExtent.map(Double.init),
                 first: buildExternalTree(from: splitState.first, containerFrame: containerFrame, bounds: firstBounds),
                 second: buildExternalTree(from: splitState.second, containerFrame: containerFrame, bounds: secondBounds)
             )
@@ -980,6 +981,30 @@ public final class BonsplitController {
             }
         }
 
+        return true
+    }
+
+    /// Imposes an exact first-child extent, in points, on a split — or
+    /// clears it with nil. While imposed, layout places the divider at
+    /// exactly this many points (clamped to pane minimums) instead of
+    /// scaling `dividerPosition`, and the mirrored fraction is kept coherent
+    /// for readers. A user divider drag clears the imposition and returns
+    /// the split to fraction semantics. Use this when pane contents are
+    /// grid-quantized (terminal cells) and a normalized fraction cannot
+    /// express the required pixel size losslessly.
+    public func setImposedFirstExtent(
+        _ extent: CGFloat?, forSplit splitId: UUID, fromExternal: Bool = false
+    ) -> Bool {
+        guard let split = internalController.findSplit(splitId) else { return false }
+        if fromExternal {
+            internalController.isExternalUpdateInProgress = true
+        }
+        split.imposedFirstExtent = extent.map { max(0, $0) }
+        if fromExternal {
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.05) { [weak self] in
+                self?.internalController.isExternalUpdateInProgress = false
+            }
+        }
         return true
     }
 

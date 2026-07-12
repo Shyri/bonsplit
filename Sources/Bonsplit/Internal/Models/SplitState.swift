@@ -16,6 +16,16 @@ final class SplitState: Identifiable {
     var second: SplitNode
     var dividerPosition: CGFloat  // 0.0 to 1.0
 
+    /// Externally imposed extent, in points, for the FIRST child along the
+    /// split axis. While set, layout places the divider at exactly this many
+    /// points (clamped to pane minimums) instead of deriving pixels from
+    /// `dividerPosition` — hosts that compute exact pane sizes (terminal
+    /// grids) lose nothing to normalized-fraction rounding or drift
+    /// deadbands. `dividerPosition` is kept mirrored to the applied value so
+    /// every fraction reader stays coherent. A user divider drag clears it:
+    /// the gesture takes ownership and fraction semantics resume.
+    var imposedFirstExtent: CGFloat?
+
     /// Animation origin for entry animation (nil = no animation needed)
     var animationOrigin: SplitAnimationOrigin?
 
