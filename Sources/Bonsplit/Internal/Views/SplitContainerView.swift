@@ -155,6 +155,18 @@ struct SplitContainerView<Content: View, EmptyContent: View>: NSViewRepresentabl
         )
     }
 
+    // A split tree is space-filling: it renders in whatever space its
+    // container gives it and has no meaningful size of its own. Without
+    // this, SwiftUI answers an unspecified proposal with AppKit's
+    // fittingSize — the sum of the current subview frames — so any
+    // container that sizes itself from its content adopts the tree's own
+    // layout as its ideal and then hands that back as the new bounds.
+    // With absolute divider positions in the tree, each round trip grows
+    // the sum, and the container inflates without bound.
+    func sizeThatFits(_ proposal: ProposedViewSize, nsView: NSSplitView, context: Context) -> CGSize? {
+        CGSize(width: proposal.width ?? 0, height: proposal.height ?? 0)
+    }
+
     func makeNSView(context: Context) -> NSSplitView {
 #if DEBUG
         let splitView: ThemedSplitView = {
