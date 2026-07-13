@@ -1,20 +1,18 @@
 import AppKit
 @testable import Bonsplit
 import SwiftUI
-import Testing
+import XCTest
 
 #if DEBUG
 @MainActor
-@Suite("Tab bar layout feedback")
-struct TabBarLayoutFeedbackTests {
-    @Test("Scrolling keeps 50 content-sized tab frames live in AppKit")
-    func scrollingManyTabsKeepsPlatformGeometryLive() throws {
+final class TabBarLayoutFeedbackTests: XCTestCase {
+    func testScrollingManyTabsKeepsPlatformGeometryLive() throws {
         let size = NSSize(width: 420, height: TabBarMetrics.barHeight)
         let controller = BonsplitController(
             configuration: BonsplitConfiguration(appearance: .default)
         )
         controller.tabShortcutHintsEnabled = false
-        let pane = try #require(controller.internalController.rootNode.allPanes.first)
+        let pane = try XCTUnwrap(controller.internalController.rootNode.allPanes.first)
         let tabs = (0..<50).map { index in
             TabItem(
                 title: "Terminal \(index + 1) — \(String(repeating: "x", count: index % 17))",
@@ -37,18 +35,18 @@ struct TabBarLayoutFeedbackTests {
             defer: false
         )
         defer { window.orderOut(nil) }
-        let contentView = try #require(window.contentView)
+        let contentView = try XCTUnwrap(window.contentView)
         hostingView.frame = NSRect(origin: .zero, size: size)
         hostingView.autoresizingMask = [.width, .height]
         contentView.addSubview(hostingView)
         window.makeKeyAndOrderFront(nil)
 
         settleLayout(in: window, hostingView: hostingView)
-        let scrollView = try #require(tabBarScrollView(in: hostingView))
-        let chromeView = try #require(
+        let scrollView = try XCTUnwrap(tabBarScrollView(in: hostingView))
+        let chromeView = try XCTUnwrap(
             descendants(ofType: TabBarSelectionChromeView.ChromeNSView.self, in: hostingView).first
         )
-        let initialFirstFrame = try #require(
+        let initialFirstFrame = try XCTUnwrap(
             chromeView.geometryRegistry?.frame(for: tabs[0].id, in: chromeView)
         )
         let maximumOffset = max(
@@ -58,7 +56,7 @@ struct TabBarLayoutFeedbackTests {
                 scrollView.documentView?.bounds.width ?? 0
             ) - scrollView.contentView.bounds.width
         )
-        #expect(maximumOffset > 0)
+        XCTAssertGreaterThan(maximumOffset, 0)
 
         for step in 1...8 {
             let offset = maximumOffset * CGFloat(step) / 8
@@ -67,13 +65,16 @@ struct TabBarLayoutFeedbackTests {
             settleLayout(in: window, hostingView: hostingView, passes: 2)
         }
 
-        let registeredFrames = try #require(chromeView.geometryRegistry?.frames(
+        let registeredFrames = try XCTUnwrap(chromeView.geometryRegistry?.frames(
             for: tabs.map(\.id),
             in: chromeView
         ))
-        let scrolledFirstFrame = try #require(registeredFrames[tabs[0].id])
-        #expect(registeredFrames.count == tabs.count)
-        #expect(abs((initialFirstFrame.minX - maximumOffset) - scrolledFirstFrame.minX) <= 1)
+        let scrolledFirstFrame = try XCTUnwrap(registeredFrames[tabs[0].id])
+        XCTAssertEqual(registeredFrames.count, tabs.count)
+        XCTAssertLessThanOrEqual(
+            abs((initialFirstFrame.minX - maximumOffset) - scrolledFirstFrame.minX),
+            1
+        )
     }
 
     private func settleLayout(in window: NSWindow, hostingView: NSView, passes: Int = 6) {
