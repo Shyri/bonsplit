@@ -1048,6 +1048,15 @@ public final class BonsplitController {
     /// express the required pixel size losslessly. Repeating the same extent
     /// is idempotent; after an external constraint change, use
     /// `retryImposedFirstExtent(forSplit:)` to request one fresh bounded apply.
+    ///
+    /// The extent is applied when set (and re-applied if the divider drifts
+    /// while the split view's own size is unchanged), but it is NOT
+    /// re-asserted after the split view resizes: a stored extent computed
+    /// for the old size is stale at the new one, and re-applying it from
+    /// inside the resize's layout pass fights AppKit recursively. A host
+    /// that imposes extents is expected to impose fresh values when the
+    /// container it derived them from changes; until it does, the divider
+    /// rides AppKit's proportional resize.
     public func setImposedFirstExtent(
         _ extent: CGFloat?, forSplit splitId: UUID, fromExternal: Bool = false
     ) -> Bool {
