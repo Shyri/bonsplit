@@ -1085,6 +1085,11 @@ public final class BonsplitController {
     /// `setImposedFirstExtent(_:forSplit:fromExternal:)`, whose identical
     /// updates are intentionally idempotent.
     public func retryImposedFirstExtent(forSplit splitId: UUID) -> Bool {
+        // A live drag session owns the divider: re-asserting an imposed
+        // extent now would yank it out from under the pointer mid-gesture.
+        // Refuse instead of deferring — the host's drag-end sync imposes
+        // fresh values (or retries) once the session closes.
+        guard internalController.activeDividerDragSessions == 0 else { return false }
         guard let split = internalController.findSplit(splitId),
               split.imposedFirstExtent != nil
         else { return false }

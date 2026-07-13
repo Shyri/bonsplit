@@ -943,7 +943,7 @@ struct SplitContainerView<Content: View, EmptyContent: View>: NSViewRepresentabl
                 guard case .split(let childState) = child else { continue }
                 if childState.imposedFirstExtent != nil {
                     childState.imposedEpoch &+= 1
-                    childState.applyImposedNow?()
+                    childState.syncDividerNow?()
                 }
                 renudgeImposedDescendants(of: childState)
             }
@@ -991,7 +991,7 @@ struct SplitContainerView<Content: View, EmptyContent: View>: NSViewRepresentabl
             if let imposed = splitState.imposedFirstExtent {
                 let target = clampedDividerPosition(imposed, in: splitView)
                 setPositionSafely(target, in: splitView, layout: true)
-                lastImposedTarget = target
+                lastImposedAvail = available
                 lastImposedEpoch = splitState.imposedEpoch
                 lastImposedOutcome = splitState.orientation == .horizontal
                     ? splitView.arrangedSubviews[0].frame.width
