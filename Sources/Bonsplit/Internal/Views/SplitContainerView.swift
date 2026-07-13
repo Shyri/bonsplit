@@ -383,9 +383,16 @@ struct SplitContainerView<Content: View, EmptyContent: View>: NSViewRepresentabl
                             duration: duration
                         ) {
                             context.coordinator.isAnimating = false
-                            // Re-assert the target ratio to prevent pixel-rounding drift.
-                            splitState.dividerPosition = targetDividerPosition
-                            context.coordinator.lastAppliedPosition = targetDividerPosition
+                            if splitState.imposedFirstExtent != nil {
+                                // An imposition requested during the entry animation
+                                // remains authoritative in the model; apply it now that
+                                // the animation guard no longer blocks synchronization.
+                                context.coordinator.syncPosition(splitState.dividerPosition, in: splitView)
+                            } else {
+                                // Re-assert the target ratio to prevent pixel-rounding drift.
+                                splitState.dividerPosition = targetDividerPosition
+                                context.coordinator.lastAppliedPosition = targetDividerPosition
+                            }
 #if DEBUG
                             dlog(
                                 "split.entry.complete split=\(splitDebugToken) orientation=\(orientationToken) " +

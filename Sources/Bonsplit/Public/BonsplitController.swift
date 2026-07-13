@@ -1012,7 +1012,9 @@ public final class BonsplitController {
     /// for readers. A user divider drag clears the imposition and returns
     /// the split to fraction semantics. Use this when pane contents are
     /// grid-quantized (terminal cells) and a normalized fraction cannot
-    /// express the required pixel size losslessly.
+    /// express the required pixel size losslessly. Repeating the same extent
+    /// is idempotent; after an external constraint change, use
+    /// `retryImposedFirstExtent(forSplit:)` to request one fresh bounded apply.
     public func setImposedFirstExtent(
         _ extent: CGFloat?, forSplit splitId: UUID, fromExternal: Bool = false
     ) -> Bool {
@@ -1031,6 +1033,21 @@ public final class BonsplitController {
                 self?.internalController.isExternalUpdateInProgress = false
             }
         }
+        return true
+    }
+
+    /// Requests one fresh apply of a split's current imposed extent.
+    ///
+    /// Use this only after constraints that previously prevented the extent
+    /// have changed. Normal layout planning should keep calling
+    /// `setImposedFirstExtent(_:forSplit:fromExternal:)`, whose identical
+    /// updates are intentionally idempotent.
+    public func retryImposedFirstExtent(forSplit splitId: UUID) -> Bool {
+        guard let split = internalController.findSplit(splitId),
+              split.imposedFirstExtent != nil
+        else { return false }
+        split.imposedEpoch &+= 1
+        split.applyImposedNow?()
         return true
     }
 
