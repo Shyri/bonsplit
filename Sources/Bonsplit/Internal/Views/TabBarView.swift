@@ -1486,6 +1486,9 @@ struct TabBarView: View {
             }
         }
         .onPreferenceChange(TabFramePreferenceKey.self) { frames in
+#if DEBUG
+            BonsplitDebugCounters.recordTabBarLayoutFeedbackMutation()
+#endif
             withTransaction(Transaction(animation: nil)) {
                 tabFramesInBar = frames
             }
