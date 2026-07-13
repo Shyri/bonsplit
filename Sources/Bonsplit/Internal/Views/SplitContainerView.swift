@@ -283,17 +283,20 @@ struct SplitContainerView<Content: View, EmptyContent: View>: NSViewRepresentabl
         context.coordinator.splitView = splitView
         let internalController = controller
         splitView.onDividerDragSession = { [weak coordinator = context.coordinator, weak internalController] active in
-            // Order matters at session END: the counter must drop to zero
-            // BEFORE the coordinator's final geometry notification, or the
-            // delegate still reads the drag as live and skips the drag-end
-            // sync. At BEGIN the coordinator arms first so isDragging is set
-            // before any delegate reacts to the session.
+            // The coordinator leads on both edges. At begin it arms isDragging
+            // before any delegate reacts to the session. At end it delivers the
+            // final geometry notification before the counter drops and the
+            // delegate hears drag-end: the delegate contract promises the
+            // settled geometry has already been reported when drag-end runs.
+            // Hosts that suppress geometry callbacks while the session is live
+            // lose nothing — the model is final by then, and drag-end is the
+            // signal to read it.
             if active {
                 coordinator?.dividerDragSessionChanged(true)
                 internalController?.noteDividerDragSession(true)
             } else {
-                internalController?.noteDividerDragSession(false)
                 coordinator?.dividerDragSessionChanged(false)
+                internalController?.noteDividerDragSession(false)
             }
         }
 
