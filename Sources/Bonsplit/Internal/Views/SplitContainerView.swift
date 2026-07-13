@@ -504,7 +504,7 @@ struct SplitContainerView<Content: View, EmptyContent: View>: NSViewRepresentabl
         // extent applies immediately instead of waiting for a SwiftUI
         // update that may never come (representables are not reliably
         // re-updated for observation-only changes).
-        splitState.applyImposedNow = { [weak coordinator = context.coordinator, weak splitView] in
+        splitState.syncDividerNow = { [weak coordinator = context.coordinator, weak splitView] in
             guard let coordinator else { return }
             // One coalesced apply on the NEXT runloop turn. Synchronous
             // application from inside the caller's plan pass re-enters

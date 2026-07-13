@@ -977,7 +977,8 @@ public final class BonsplitController {
 
     // MARK: - Geometry Update API
 
-    /// Set divider position for a split node (0.0-1.0)
+    /// Set divider position for a split node (0.0-1.0), clearing any exact
+    /// imposed extent so fraction-based callers take ownership of the divider.
     /// - Parameters:
     ///   - position: The new divider position (clamped to the configured range)
     ///   - splitId: The UUID of the split to update
@@ -993,7 +994,15 @@ public final class BonsplitController {
 
         let range = configuration.dividerPositionRange
         let clampedPosition = min(max(position, range.lowerBound), range.upperBound)
+        let clearedImposition = split.imposedFirstExtent != nil
+        if clearedImposition {
+            split.imposedFirstExtent = nil
+            split.imposedEpoch &+= 1
+        }
         split.dividerPosition = clampedPosition
+        if clearedImposition {
+            split.syncDividerNow?()
+        }
 
         if fromExternal {
             // Use a slight delay to allow the UI to update before re-enabling notifications
@@ -1027,7 +1036,7 @@ public final class BonsplitController {
             split.imposedFirstExtent = normalizedExtent
             split.imposedEpoch &+= 1
         }
-        split.applyImposedNow?()
+        split.syncDividerNow?()
         if fromExternal {
             DispatchQueue.main.asyncAfter(deadline: .now() + 0.05) { [weak self] in
                 self?.internalController.isExternalUpdateInProgress = false
@@ -1047,7 +1056,7 @@ public final class BonsplitController {
               split.imposedFirstExtent != nil
         else { return false }
         split.imposedEpoch &+= 1
-        split.applyImposedNow?()
+        split.syncDividerNow?()
         return true
     }
 

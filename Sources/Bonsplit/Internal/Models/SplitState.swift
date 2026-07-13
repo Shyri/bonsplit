@@ -29,13 +29,13 @@ final class SplitState: Identifiable {
     /// keys off this so repeated identical plans cannot keep re-arming a
     /// target that AppKit permanently refuses.
     var imposedEpoch: Int = 0
-    /// Imperative hook the live split view's coordinator installs so an
-    /// imposition applies IMMEDIATELY. Routing impositions through SwiftUI
+    /// Imperative hook the live split view's coordinator installs so divider
+    /// authority changes apply immediately. Routing them through SwiftUI
     /// observation is not reliable for representables: a split whose only
-    /// change is a re-imposed extent may never get another updateNSView,
-    /// and its divider then renders a previous layout until some unrelated
-    /// event nudges it. Weakly captured internals; safe to call when stale.
-    @ObservationIgnored var applyImposedNow: (() -> Void)?
+    /// change is an extent update may never get another updateNSView, and its
+    /// divider then renders a previous layout until some unrelated event
+    /// nudges it. Weakly captured internals; safe to call when stale.
+    @ObservationIgnored var syncDividerNow: (() -> Void)?
 
     /// Animation origin for entry animation (nil = no animation needed)
     var animationOrigin: SplitAnimationOrigin?
