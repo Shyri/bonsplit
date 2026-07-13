@@ -3532,11 +3532,13 @@ final class BonsplitTests: XCTestCase {
     /// resizes, and the fresh plan often computes the SAME number: per-pane
     /// ideals are container-independent (a row of N terminal cells is the
     /// same points in any container). Meanwhile AppKit's proportional resize
-    /// has moved the divider off the imposed extent. The coordinator gives
-    /// the parked divider one bounded apply of its own when the container
-    /// settles, and the identical re-imposition must also be accepted, not
-    /// deduped by value — either way the divider ends at the extent, never
-    /// wedged at the proportional position.
+    /// has moved the divider off the imposed extent. Two recovery edges must
+    /// both work, and this test pins each to its own trigger: the container
+    /// size change re-arms one apply of its own, and an explicit identical
+    /// re-imposition must be accepted, not deduped by value. The second half
+    /// isolates the re-imposition by moving the divider at CONSTANT
+    /// container size — the size-change re-arm cannot fire there, and the
+    /// test proves nothing heals the divider until the re-impose call runs.
     @MainActor
     func testReimposingSameExtentAfterContainerResizeRetargetsExactly() throws {
         var configuration = BonsplitConfiguration()
@@ -3597,11 +3599,22 @@ final class BonsplitTests: XCTestCase {
         let imposed = CGFloat(120)
         XCTAssertEqual(settleImposed(imposed), imposed, accuracy: 1.5)
 
-        // The container shrinks; AppKit rescales the split proportionally,
-        // moving the divider off the imposed extent. The resize itself
-        // re-arms one deferred apply, so the divider comes back without a
-        // fresh impose call.
+        // The container shrinks; AppKit rescales the split proportionally.
+        // Capture the divider before any runloop turn — the re-arm's heal is
+        // deferred a turn, so the drift must be observable here or the
+        // recovery assertions below would pass vacuously.
         window.setContentSize(NSSize(width: 300, height: 300))
+        contentView.layoutSubtreeIfNeeded()
+        splitView.layoutSubtreeIfNeeded()
+        let drifted = splitView.arrangedSubviews[0].frame.width
+        XCTAssertLessThan(
+            drifted,
+            imposed - 4,
+            "expected the proportional resize to move the divider off the imposed extent"
+        )
+
+        // The size change itself re-arms one deferred apply: the divider
+        // comes back with no fresh impose call.
         for _ in 0..<12 {
             contentView.layoutSubtreeIfNeeded()
             RunLoop.current.run(until: Date().addingTimeInterval(0.02))
@@ -3614,11 +3627,39 @@ final class BonsplitTests: XCTestCase {
             "the container resize must re-arm one apply of the stored extent"
         )
 
+        // Now isolate the re-imposition edge from the size-change edge: move
+        // the divider at CONSTANT container size, behind the coordinator's
+        // back (a direct AppKit setPosition keeps the imposition stored and
+        // changes no avail, so the size-change re-arm cannot fire).
+        let perturbed = CGFloat(200)
+        splitView.setPosition(perturbed, ofDividerAt: 0)
+        splitView.layoutSubtreeIfNeeded()
+        XCTAssertEqual(
+            splitView.arrangedSubviews[0].frame.width,
+            perturbed,
+            accuracy: 1.5,
+            "the programmatic perturbation must actually move the divider"
+        )
+
+        // With no size change and no impose call, nothing may heal this:
+        // pumping must leave the divider where the perturbation put it.
+        for _ in 0..<6 {
+            splitView.layoutSubtreeIfNeeded()
+            RunLoop.current.run(until: Date().addingTimeInterval(0.02))
+            contentView.layoutSubtreeIfNeeded()
+        }
+        XCTAssertEqual(
+            splitView.arrangedSubviews[0].frame.width,
+            perturbed,
+            accuracy: 1.5,
+            "at constant container size, no autonomous heal may move the divider — recovery below is attributable to the re-impose call alone"
+        )
+
         XCTAssertEqual(
             settleImposed(imposed),
             imposed,
             accuracy: 1.5,
-            "an identical re-imposition after a container resize must be accepted, not deduped away"
+            "an identical re-imposition must be accepted, not deduped away — it is the only actor left"
         )
     }
 
@@ -3774,18 +3815,29 @@ final class BonsplitTests: XCTestCase {
 
         // Grow the container. No further imposition, no drag session: the
         // stored extent is the only authority left, and it still fits.
+        // Capture the divider before any runloop turn — the heal is deferred
+        // a turn, so the proportional drift must be observable here or the
+        // recovery assertion below would pass vacuously.
         window.setContentSize(NSSize(width: 640, height: 300))
+        contentView.layoutSubtreeIfNeeded()
+        splitView.layoutSubtreeIfNeeded()
+        XCTAssertGreaterThan(
+            splitView.bounds.width,
+            500,
+            "the window resize must have reached the split view for this test to mean anything"
+        )
+        XCTAssertGreaterThan(
+            splitView.arrangedSubviews[0].frame.width,
+            imposed + 20,
+            "expected the proportional resize to move the divider off the imposed extent (~192pt for 400→640)"
+        )
+
         for _ in 0..<12 {
             contentView.layoutSubtreeIfNeeded()
             RunLoop.current.run(until: Date().addingTimeInterval(0.02))
             splitView.layoutSubtreeIfNeeded()
             if abs(splitView.arrangedSubviews[0].frame.width - imposed) <= 1 { break }
         }
-        XCTAssertGreaterThan(
-            splitView.bounds.width,
-            500,
-            "the window resize must have reached the split view for this test to mean anything"
-        )
         XCTAssertEqual(
             splitView.arrangedSubviews[0].frame.width,
             imposed,
