@@ -3506,6 +3506,99 @@ final class BonsplitTests: XCTestCase {
         )
     }
 
+    /// A host that imposes exact extents re-imposes after its container
+    /// resizes, and the fresh plan often computes the SAME number: per-pane
+    /// ideals are container-independent (a row of N terminal cells is the
+    /// same points in any container). Meanwhile AppKit's proportional resize
+    /// has moved the divider off the imposed extent. The coordinator's
+    /// renudge path documents that every explicit imposition call re-arms
+    /// one apply ("bounded by explicit calls"), so the identical re-imposition
+    /// must put the divider back — deduping it by value leaves the divider
+    /// wedged at the proportional position until some input happens to
+    /// change the number.
+    @MainActor
+    func testReimposingSameExtentAfterContainerResizeRetargetsExactly() throws {
+        var configuration = BonsplitConfiguration()
+        configuration.appearance.minimumPaneWidth = 1
+        configuration.appearance.minimumPaneHeight = 1
+        configuration.appearance.enableAnimations = false
+        configuration.dividerPositionRange = 0...1
+        let controller = BonsplitController(configuration: configuration)
+        _ = controller.createTab(title: "Left")
+        let sourcePane = try XCTUnwrap(controller.focusedPaneId)
+        XCTAssertNotNil(controller.splitPane(
+            sourcePane,
+            orientation: .horizontal,
+            initialDividerPosition: 0.5
+        ))
+        guard case .split(let split) = controller.treeSnapshot() else {
+            XCTFail("Expected split root")
+            return
+        }
+        let splitId = try XCTUnwrap(UUID(uuidString: split.id))
+
+        let hostingView = NSHostingView(
+            rootView: BonsplitView(controller: controller) { _, _ in
+                Color.clear
+            } emptyPane: { _ in
+                Color.clear
+            }
+        )
+        let window = NSWindow(
+            contentRect: NSRect(x: 0, y: 0, width: 400, height: 300),
+            styleMask: [.titled, .closable],
+            backing: .buffered,
+            defer: false
+        )
+        defer { window.orderOut(nil) }
+        let contentView = try XCTUnwrap(window.contentView)
+        hostingView.frame = contentView.bounds
+        hostingView.autoresizingMask = [.width, .height]
+        contentView.addSubview(hostingView)
+        window.makeKeyAndOrderFront(nil)
+        contentView.layoutSubtreeIfNeeded()
+        RunLoop.current.run(until: Date().addingTimeInterval(0.05))
+        contentView.layoutSubtreeIfNeeded()
+        let splitView = try XCTUnwrap(firstDescendant(ofType: NSSplitView.self, in: hostingView))
+        XCTAssertEqual(splitView.arrangedSubviews.count, 2)
+
+        func settleImposed(_ extent: CGFloat) -> CGFloat {
+            _ = controller.setImposedFirstExtent(extent, forSplit: splitId, fromExternal: true)
+            for _ in 0..<12 {
+                splitView.layoutSubtreeIfNeeded()
+                RunLoop.current.run(until: Date().addingTimeInterval(0.02))
+                contentView.layoutSubtreeIfNeeded()
+                if abs(splitView.arrangedSubviews[0].frame.width - extent) <= 1 { break }
+            }
+            return splitView.arrangedSubviews[0].frame.width
+        }
+
+        let imposed = CGFloat(120)
+        XCTAssertEqual(settleImposed(imposed), imposed, accuracy: 1.5)
+
+        // The container shrinks; AppKit rescales the split proportionally and
+        // the divider drifts off the imposed extent (one-writer: nothing puts
+        // it back until the host re-imposes).
+        window.setContentSize(NSSize(width: 300, height: 300))
+        for _ in 0..<12 {
+            contentView.layoutSubtreeIfNeeded()
+            RunLoop.current.run(until: Date().addingTimeInterval(0.02))
+        }
+        let drifted = splitView.arrangedSubviews[0].frame.width
+        XCTAssertLessThan(
+            drifted,
+            imposed - 4,
+            "expected the proportional resize to move the divider off the imposed extent"
+        )
+
+        XCTAssertEqual(
+            settleImposed(imposed),
+            imposed,
+            accuracy: 1.5,
+            "identical re-imposition after a container resize was deduped away; the divider stayed at the drifted position"
+        )
+    }
+
     @MainActor
     func testTranslucentSplitWrappersStayClear() {
         let appearance = BonsplitConfiguration.Appearance(

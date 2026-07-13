@@ -1045,9 +1045,14 @@ public final class BonsplitController {
     /// for readers. A user divider drag clears the imposition and returns
     /// the split to fraction semantics. Use this when pane contents are
     /// grid-quantized (terminal cells) and a normalized fraction cannot
-    /// express the required pixel size losslessly. Repeating the same extent
-    /// is idempotent; after an external constraint change, use
-    /// `retryImposedFirstExtent(forSplit:)` to request one fresh bounded apply.
+    /// express the required pixel size losslessly. Every explicit call
+    /// re-arms one bounded apply, including a call that repeats the stored
+    /// extent: hosts re-impose after their container resizes, and the fresh
+    /// plan often computes the SAME extent (per-pane ideals are container-
+    /// independent) while the resize moved the divider off it — deduping the
+    /// call by value would leave the divider wedged at the drifted position.
+    /// Repeating the extent stays cheap when the divider is already at the
+    /// target (the coordinator refreshes its memos without a layout pass).
     ///
     /// The extent is applied when set (and re-applied if the divider drifts
     /// while the split view's own size is unchanged), but it is NOT
@@ -1067,6 +1072,15 @@ public final class BonsplitController {
         let normalizedExtent = extent.map { max(0, $0) }
         if split.imposedFirstExtent != normalizedExtent {
             split.imposedFirstExtent = normalizedExtent
+            split.imposedEpoch &+= 1
+        } else if normalizedExtent != nil {
+            // Same extent, explicit call: re-arm one apply anyway. The
+            // coordinator's renudge path is memo-only when the divider is
+            // already at the target, so this cannot churn layout; when the
+            // divider drifted (a container resize rescaled it while the
+            // re-planned extent came out identical), this is the only thing
+            // that puts it back — see `syncPosition`'s "bounded by explicit
+            // calls" contract.
             split.imposedEpoch &+= 1
         }
         split.syncDividerNow?()
