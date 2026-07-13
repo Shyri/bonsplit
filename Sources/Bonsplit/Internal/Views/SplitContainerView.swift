@@ -717,8 +717,8 @@ struct SplitContainerView<Content: View, EmptyContent: View>: NSViewRepresentabl
         var lastAppliedPosition: CGFloat = 0.5
         /// What the last imposed apply actually produced, and how big the
         /// split view was at the time. syncPosition compares against both to
-        /// decide whether a moved divider should be put back or left for the
-        /// host to re-impose at the new size.
+        /// decide whether a moved divider is put back synchronously (same
+        /// size) or re-armed for one deferred apply at the settled size.
         var lastImposedOutcome: CGFloat?
         var lastImposedAvail: CGFloat?
         var lastImposedEpoch: Int?
@@ -1077,17 +1077,22 @@ struct SplitContainerView<Content: View, EmptyContent: View>: NSViewRepresentabl
                 // A new imposition always applies. Beyond that, when the
                 // divider is not where we left it, what to do depends on
                 // whether the split view itself was resized since we last
-                // applied. If it was, our stored extent is out of date and
-                // the host will send a new one computed for the new size —
-                // re-applying the old one here just moves the divider back
-                // and forth against AppKit on every update until it does.
-                // If the split view is the SAME size, no new extent is
-                // coming (the host only recomputes when something it can see
-                // changed), so a nudged divider would stay wrong forever —
-                // put it back; one apply settles it, since applying cannot
-                // resize the split view. And never apply when the divider is
-                // already at the target: a same-position setPosition still
-                // runs a layout pass, which re-applies surface sizes, which
+                // applied. If the split view is the SAME size, no new extent
+                // is coming (the host only recomputes when something it can
+                // see changed), so a nudged divider would stay wrong forever
+                // — put it back synchronously; one apply settles it, since
+                // applying cannot resize the split view. If the split view
+                // WAS resized, applying synchronously from inside the
+                // resize's own layout pass fights AppKit, so re-arm one
+                // deferred apply against the settled size instead (below).
+                // We cannot just park and wait for the host: a host whose
+                // per-pane ideals are container-independent re-imposes the
+                // SAME extent, and only when its own inputs change — an
+                // apply may never terminate off-target without a re-arm
+                // edge, or the divider stays at the proportional position
+                // indefinitely. And never apply when the divider is already
+                // at the target: a same-position setPosition still runs a
+                // layout pass, which re-applies surface sizes, which
                 // re-imposes — a once-per-turn churn loop at full CPU.
                 let moved = abs(current - (lastImposedOutcome ?? .infinity)) > 0.01
                 let availUnchanged = abs(available - (lastImposedAvail ?? -1)) <= 0.01
@@ -1124,6 +1129,16 @@ struct SplitContainerView<Content: View, EmptyContent: View>: NSViewRepresentabl
                     } else {
                         imposedRetryBudget = 0
                     }
+                } else if moved && !availUnchanged {
+                    // The container resized under an unchanged imposed
+                    // extent. Recording the new avail immediately bounds
+                    // this to one re-arm per size change; the deferred
+                    // apply runs a turn later, after AppKit's resize pass
+                    // has finished, so there is no recursive fighting.
+                    lastImposedAvail = available
+                    imposedRetryBudget = max(imposedRetryBudget, 1)
+                    imposedRetrySplitView = splitView
+                    scheduleImposedRetry()
                 } else if imposedRetryBudget > 0 {
                     // A retry chain the drag-session gate interrupted parked
                     // here with budget left; the session-end renudge lands in
@@ -1369,16 +1384,28 @@ struct SplitContainerView<Content: View, EmptyContent: View>: NSViewRepresentabl
                     // isSyncingProgrammatically, so the recursive didResize is
                     // caught by the guard above; waiting a turn would let the
                     // in-between frame reach ghostty and reflow content). A
-                    // split with an imposed extent must NOT do that: when its
-                    // container resizes, the stored extent is out of date, and
-                    // putting the divider back from inside the very layout
-                    // pass that moved it starts another layout pass — that
-                    // recursion is what pinned the main thread. The host sends
-                    // a new extent for the new size; until it lands, a
-                    // not-yet-right frame is fine.
+                    // split with an imposed extent must NOT do that: putting
+                    // the divider back from inside the very layout pass that
+                    // moved it starts another layout pass — that recursion is
+                    // what pinned the main thread. But it cannot just park
+                    // and wait for the host either: a host whose per-pane
+                    // ideals are container-independent re-imposes the SAME
+                    // extent, and only when its own inputs change, so nothing
+                    // would ever move the divider off AppKit's proportional
+                    // position. Re-arm one deferred apply against the settled
+                    // size instead — recording the new avail immediately
+                    // bounds this to one re-arm per size change, and the
+                    // apply runs a turn later, outside this layout pass. A
+                    // mid-drag retry refuses without consuming the budget and
+                    // the session-end renudge resumes the chain.
                     if self.splitState.imposedFirstExtent == nil {
                         let statePosition = self.splitState.dividerPosition
                         self.syncPosition(statePosition, in: splitView)
+                    } else if abs(availableSize - (self.lastImposedAvail ?? -1)) > 0.01 {
+                        self.lastImposedAvail = availableSize
+                        self.imposedRetryBudget = max(self.imposedRetryBudget, 1)
+                        self.imposedRetrySplitView = splitView
+                        self.scheduleImposedRetry()
                     }
                     self.onGeometryChange?(false)
                     return

@@ -1062,14 +1062,16 @@ public final class BonsplitController {
     /// Repeating the extent stays cheap when the divider is already at the
     /// target (the coordinator refreshes its memos without a layout pass).
     ///
-    /// The extent is applied when set (and re-applied if the divider drifts
-    /// while the split view's own size is unchanged), but it is NOT
-    /// re-asserted after the split view resizes: a stored extent computed
-    /// for the old size is stale at the new one, and re-applying it from
-    /// inside the resize's layout pass fights AppKit recursively. A host
-    /// that imposes extents is expected to impose fresh values when the
-    /// container it derived them from changes; until it does, the divider
-    /// rides AppKit's proportional resize.
+    /// The extent is applied when set, re-applied if the divider drifts
+    /// while the split view's own size is unchanged, and re-applied once
+    /// (deferred a runloop turn, clamped to the new bounds) after the split
+    /// view itself resizes. The resize case cannot apply synchronously —
+    /// that fights AppKit from inside its own layout pass — but it cannot
+    /// just wait for the host either: a host whose per-pane ideals are
+    /// container-independent re-imposes the same extent, and only when its
+    /// own inputs change, so a divider parked at AppKit's proportional
+    /// position would stay there until some unrelated input. An apply never
+    /// terminates off-target without re-arming on the next size change.
     public func setImposedFirstExtent(
         _ extent: CGFloat?, forSplit splitId: UUID, fromExternal: Bool = false
     ) -> Bool {
@@ -1086,9 +1088,9 @@ public final class BonsplitController {
             // coordinator's renudge path is memo-only when the divider is
             // already at the target, so this cannot churn layout; when the
             // divider drifted (a container resize rescaled it while the
-            // re-planned extent came out identical), this is the only thing
-            // that puts it back — see `syncPosition`'s "bounded by explicit
-            // calls" contract.
+            // re-planned extent came out identical), this puts it back
+            // without waiting for the coordinator's own resize re-arm —
+            // see `syncPosition`'s "bounded by explicit calls" contract.
             split.imposedEpoch &+= 1
         }
         split.syncDividerNow?()

@@ -3532,12 +3532,11 @@ final class BonsplitTests: XCTestCase {
     /// resizes, and the fresh plan often computes the SAME number: per-pane
     /// ideals are container-independent (a row of N terminal cells is the
     /// same points in any container). Meanwhile AppKit's proportional resize
-    /// has moved the divider off the imposed extent. The coordinator's
-    /// renudge path documents that every explicit imposition call re-arms
-    /// one apply ("bounded by explicit calls"), so the identical re-imposition
-    /// must put the divider back — deduping it by value leaves the divider
-    /// wedged at the proportional position until some input happens to
-    /// change the number.
+    /// has moved the divider off the imposed extent. The coordinator gives
+    /// the parked divider one bounded apply of its own when the container
+    /// settles, and the identical re-imposition must also be accepted, not
+    /// deduped by value — either way the divider ends at the extent, never
+    /// wedged at the proportional position.
     @MainActor
     func testReimposingSameExtentAfterContainerResizeRetargetsExactly() throws {
         var configuration = BonsplitConfiguration()
@@ -3598,26 +3597,28 @@ final class BonsplitTests: XCTestCase {
         let imposed = CGFloat(120)
         XCTAssertEqual(settleImposed(imposed), imposed, accuracy: 1.5)
 
-        // The container shrinks; AppKit rescales the split proportionally and
-        // the divider drifts off the imposed extent (one-writer: nothing puts
-        // it back until the host re-imposes).
+        // The container shrinks; AppKit rescales the split proportionally,
+        // moving the divider off the imposed extent. The resize itself
+        // re-arms one deferred apply, so the divider comes back without a
+        // fresh impose call.
         window.setContentSize(NSSize(width: 300, height: 300))
         for _ in 0..<12 {
             contentView.layoutSubtreeIfNeeded()
             RunLoop.current.run(until: Date().addingTimeInterval(0.02))
+            if abs(splitView.arrangedSubviews[0].frame.width - imposed) <= 1 { break }
         }
-        let drifted = splitView.arrangedSubviews[0].frame.width
-        XCTAssertLessThan(
-            drifted,
-            imposed - 4,
-            "expected the proportional resize to move the divider off the imposed extent"
+        XCTAssertEqual(
+            splitView.arrangedSubviews[0].frame.width,
+            imposed,
+            accuracy: 1.5,
+            "the container resize must re-arm one apply of the stored extent"
         )
 
         XCTAssertEqual(
             settleImposed(imposed),
             imposed,
             accuracy: 1.5,
-            "identical re-imposition after a container resize was deduped away; the divider stayed at the drifted position"
+            "an identical re-imposition after a container resize must be accepted, not deduped away"
         )
     }
 
@@ -3705,6 +3706,91 @@ final class BonsplitTests: XCTestCase {
             imposed,
             accuracy: 1.5,
             "the armed extent must apply once the session closes, with no fresh impose call"
+        )
+    }
+
+    /// A container resize rescales the split proportionally, moving the
+    /// divider off its imposed extent. Hosts whose per-pane ideals are
+    /// container-independent re-impose the SAME extent, and only when their
+    /// own inputs change — so if nothing re-applies the stored extent here,
+    /// the divider stays at the proportional position indefinitely. The
+    /// imposed sync must give the parked divider one bounded apply against
+    /// the settled size, with no fresh imposition and no drag session.
+    @MainActor
+    func testImposedExtentReappliesAfterContainerResizeWithoutFreshImposition() throws {
+        var configuration = BonsplitConfiguration()
+        configuration.appearance.minimumPaneWidth = 1
+        configuration.appearance.minimumPaneHeight = 1
+        configuration.appearance.enableAnimations = false
+        configuration.dividerPositionRange = 0...1
+        let controller = BonsplitController(configuration: configuration)
+        _ = controller.createTab(title: "Left")
+        let sourcePane = try XCTUnwrap(controller.focusedPaneId)
+        XCTAssertNotNil(controller.splitPane(
+            sourcePane,
+            orientation: .horizontal,
+            initialDividerPosition: 0.5
+        ))
+        guard case .split(let split) = controller.treeSnapshot() else {
+            XCTFail("Expected split root")
+            return
+        }
+        let splitId = try XCTUnwrap(UUID(uuidString: split.id))
+
+        let hostingView = NSHostingView(
+            rootView: BonsplitView(controller: controller) { _, _ in
+                Color.clear
+            } emptyPane: { _ in
+                Color.clear
+            }
+        )
+        let window = NSWindow(
+            contentRect: NSRect(x: 0, y: 0, width: 400, height: 300),
+            styleMask: [.titled, .closable],
+            backing: .buffered,
+            defer: false
+        )
+        defer { window.orderOut(nil) }
+        let contentView = try XCTUnwrap(window.contentView)
+        hostingView.frame = contentView.bounds
+        hostingView.autoresizingMask = [.width, .height]
+        contentView.addSubview(hostingView)
+        window.makeKeyAndOrderFront(nil)
+        contentView.layoutSubtreeIfNeeded()
+        RunLoop.current.run(until: Date().addingTimeInterval(0.05))
+        contentView.layoutSubtreeIfNeeded()
+        let splitView = try XCTUnwrap(firstDescendant(ofType: NSSplitView.self, in: hostingView))
+        XCTAssertEqual(splitView.arrangedSubviews.count, 2)
+
+        let imposed = CGFloat(120)
+        XCTAssertTrue(controller.setImposedFirstExtent(imposed, forSplit: splitId))
+        for _ in 0..<12 {
+            splitView.layoutSubtreeIfNeeded()
+            RunLoop.current.run(until: Date().addingTimeInterval(0.02))
+            contentView.layoutSubtreeIfNeeded()
+            if abs(splitView.arrangedSubviews[0].frame.width - imposed) <= 1 { break }
+        }
+        XCTAssertEqual(splitView.arrangedSubviews[0].frame.width, imposed, accuracy: 1.5)
+
+        // Grow the container. No further imposition, no drag session: the
+        // stored extent is the only authority left, and it still fits.
+        window.setContentSize(NSSize(width: 640, height: 300))
+        for _ in 0..<12 {
+            contentView.layoutSubtreeIfNeeded()
+            RunLoop.current.run(until: Date().addingTimeInterval(0.02))
+            splitView.layoutSubtreeIfNeeded()
+            if abs(splitView.arrangedSubviews[0].frame.width - imposed) <= 1 { break }
+        }
+        XCTAssertGreaterThan(
+            splitView.bounds.width,
+            500,
+            "the window resize must have reached the split view for this test to mean anything"
+        )
+        XCTAssertEqual(
+            splitView.arrangedSubviews[0].frame.width,
+            imposed,
+            accuracy: 1.5,
+            "a parked imposed divider must get one bounded apply when the container settles"
         )
     }
 
