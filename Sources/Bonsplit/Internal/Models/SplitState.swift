@@ -25,11 +25,9 @@ final class SplitState: Identifiable {
     /// every fraction reader stays coherent. A user divider drag clears it:
     /// the gesture takes ownership and fraction semantics resume.
     var imposedFirstExtent: CGFloat?
-    /// Bumped on every explicit imposition call. The view's convergence memo
-    /// keys off this so a re-imposed target gets exactly one fresh apply
-    /// attempt even when neither the target nor the divider has moved —
-    /// AppKit may have refused the same target earlier (transient pane
-    /// minimums mid-churn) and the refusal is not permanent.
+    /// Bumped when the imposed target changes. The view's convergence memo
+    /// keys off this so repeated identical plans cannot keep re-arming a
+    /// target that AppKit permanently refuses.
     var imposedEpoch: Int = 0
     /// Imperative hook the live split view's coordinator installs so an
     /// imposition applies IMMEDIATELY. Routing impositions through SwiftUI

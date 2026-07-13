@@ -488,9 +488,8 @@ struct SplitContainerView<Content: View, EmptyContent: View>: NSViewRepresentabl
 
         // Access dividerPosition (and the imposed extent) so SwiftUI tracks
         // them as dependencies, then sync if either changed externally. The
-        // epoch must be read too: re-imposing an UNCHANGED extent bumps only
-        // the epoch, and without this read nothing invalidates the view, so
-        // syncPosition — where the refused-target retry lives — never runs.
+        // epoch must be read too so a changed target invalidates the view even
+        // when observation coalesces the extent write with adjacent updates.
         _ = splitState.imposedFirstExtent
         _ = splitState.imposedEpoch
         // Imperative imposition path: the controller calls this the moment
@@ -892,6 +891,24 @@ struct SplitContainerView<Content: View, EmptyContent: View>: NSViewRepresentabl
             guard splitView.arrangedSubviews.count >= 2 else { return }
             let available = splitAvailableSize(in: splitView)
             guard available > 0 else { return }
+            if let imposed = splitState.imposedFirstExtent {
+                let target = clampedDividerPosition(imposed, in: splitView)
+                setPositionSafely(target, in: splitView, layout: true)
+                lastImposedTarget = target
+                lastImposedEpoch = splitState.imposedEpoch
+                lastImposedOutcome = splitState.orientation == .horizontal
+                    ? splitView.arrangedSubviews[0].frame.width
+                    : splitView.arrangedSubviews[0].frame.height
+                mirrorImposedOutcome(lastImposedOutcome ?? target, in: splitView)
+                if abs((lastImposedOutcome ?? target) - target) > 0.01 {
+                    imposedRetryBudget = 5
+                    imposedRetrySplitView = splitView
+                    scheduleImposedRetry()
+                } else {
+                    imposedRetryBudget = 0
+                }
+                return
+            }
             let bounds = normalizedDividerBounds(in: splitView)
             let normalized = max(bounds.lowerBound, min(bounds.upperBound, splitState.dividerPosition))
             setPositionSafely(available * normalized, in: splitView, layout: true)

@@ -1020,8 +1020,11 @@ public final class BonsplitController {
         if fromExternal {
             internalController.isExternalUpdateInProgress = true
         }
-        split.imposedFirstExtent = extent.map { max(0, $0) }
-        split.imposedEpoch &+= 1
+        let normalizedExtent = extent.map { max(0, $0) }
+        if split.imposedFirstExtent != normalizedExtent {
+            split.imposedFirstExtent = normalizedExtent
+            split.imposedEpoch &+= 1
+        }
         split.applyImposedNow?()
         if fromExternal {
             DispatchQueue.main.asyncAfter(deadline: .now() + 0.05) { [weak self] in
