@@ -7,19 +7,19 @@ import Foundation
 /// detect transient structural updates that can cause visible flashes.
 public enum BonsplitDebugCounters {
     public private(set) static var arrangedSubviewUnderflowCount: Int = 0
-    public private(set) static var tabBarLayoutFeedbackMutationCount: Int = 0
+    public private(set) static var tabFrameLayoutFeedbackMutationCount: Int = 0
 
     public static func reset() {
         arrangedSubviewUnderflowCount = 0
-        tabBarLayoutFeedbackMutationCount = 0
+        tabFrameLayoutFeedbackMutationCount = 0
     }
 
     internal static func recordArrangedSubviewUnderflow() {
         arrangedSubviewUnderflowCount += 1
     }
 
-    internal static func recordTabBarLayoutFeedbackMutation() {
-        tabBarLayoutFeedbackMutationCount += 1
+    internal static func recordTabFrameLayoutFeedbackMutation() {
+        tabFrameLayoutFeedbackMutationCount += 1
     }
 }
 #endif

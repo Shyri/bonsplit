@@ -45,6 +45,12 @@ struct TabBarLayoutFeedbackTests {
 
         settleLayout(in: window, hostingView: hostingView)
         let scrollView = try #require(tabBarScrollView(in: hostingView))
+        let chromeView = try #require(
+            descendants(ofType: TabBarSelectionChromeView.ChromeNSView.self, in: hostingView).first
+        )
+        let initialFirstFrame = try #require(
+            chromeView.geometryRegistry?.frame(for: tabs[0].id, in: chromeView)
+        )
         let maximumOffset = max(
             0,
             max(
@@ -62,8 +68,16 @@ struct TabBarLayoutFeedbackTests {
             settleLayout(in: window, hostingView: hostingView, passes: 2)
         }
 
+        let registeredFrames = try #require(chromeView.geometryRegistry?.frames(
+            for: tabs.map(\.id),
+            in: chromeView
+        ))
+        let scrolledFirstFrame = try #require(registeredFrames[tabs[0].id])
+        #expect(registeredFrames.count == tabs.count)
+        #expect(abs((initialFirstFrame.minX - maximumOffset) - scrolledFirstFrame.minX) <= 1)
+
         #expect(
-            BonsplitDebugCounters.tabBarLayoutFeedbackMutationCount == 0,
+            BonsplitDebugCounters.tabFrameLayoutFeedbackMutationCount == 0,
             "Tab geometry must remain inside AppKit layout instead of invalidating the SwiftUI view graph."
         )
     }
