@@ -3,8 +3,15 @@ import AppKit
 
 private var splitContainerProgrammaticSyncDepth = 0
 
-private class ThemedSplitView: NSSplitView {
+private class ThemedSplitView: NSSplitView, BonsplitManagedSplitView {
     var customDividerColor: NSColor?
+
+    /// Identity for external drag coordination (see BonsplitManagedSplitView).
+    weak var stampedInternalController: SplitViewController?
+    var stampedSplitId: UUID?
+
+    var bonsplitController: BonsplitController? { stampedInternalController?.publicController }
+    var bonsplitSplitId: UUID? { stampedSplitId }
 
     /// Host-configured divider thickness in points. When `nil` the split view
     /// uses AppKit's default thickness for its `dividerStyle`.
@@ -38,6 +45,31 @@ private class ThemedSplitView: NSSplitView {
 
     override var dividerThickness: CGFloat {
         customDividerThickness ?? super.dividerThickness
+    }
+
+    /// When the host injects divider cursors, replace AppKit's built-in
+    /// divider cursor rects (added by super) with the custom cursor over
+    /// each divider's expanded effective rect.
+    override func resetCursorRects() {
+        let custom = isVertical ? BonsplitDividerCursors.vertical : BonsplitDividerCursors.horizontal
+        guard let custom else {
+            super.resetCursorRects()
+            return
+        }
+        let expansion = resolvedDividerHitExpansion
+        let thickness = dividerThickness
+        for index in 0..<max(0, arrangedSubviews.count - 1) {
+            let first = arrangedSubviews[index].frame
+            var rect = isVertical
+                ? NSRect(x: max(0, first.maxX), y: 0, width: thickness, height: bounds.height)
+                : NSRect(x: 0, y: max(0, first.maxY), width: bounds.width, height: thickness)
+            rect = rect.insetBy(
+                dx: isVertical ? -expansion : 0,
+                dy: isVertical ? 0 : -expansion
+            ).intersection(bounds)
+            guard !rect.isNull, rect.width > 0, rect.height > 0 else { continue }
+            addCursorRect(rect, cursor: custom)
+        }
     }
 
     // Paint the full reserved divider rect with the resolved color so a
@@ -180,6 +212,8 @@ struct SplitContainerView<Content: View, EmptyContent: View>: NSViewRepresentabl
         splitView.customDividerColor = TabBarColors.nsColorSeparator(for: appearance)
         splitView.customDividerThickness = TabBarMetrics.resolvedDividerThickness(appearance.dividerThickness)
         splitView.customDividerHitExpansion = appearance.dividerHitExpansion
+        splitView.stampedInternalController = controller
+        splitView.stampedSplitId = splitState.id
         splitView.isVertical = splitState.orientation == .horizontal
         splitView.dividerStyle = .thin
         splitView.delegate = context.coordinator
@@ -409,6 +443,8 @@ struct SplitContainerView<Content: View, EmptyContent: View>: NSViewRepresentabl
         let dividerThicknessChanged = (splitView as? ThemedSplitView)?.customDividerThickness != resolvedThickness
         (splitView as? ThemedSplitView)?.customDividerThickness = resolvedThickness
         (splitView as? ThemedSplitView)?.customDividerHitExpansion = appearance.dividerHitExpansion
+        (splitView as? ThemedSplitView)?.stampedInternalController = controller
+        (splitView as? ThemedSplitView)?.stampedSplitId = splitState.id
 
         // Update orientation if changed
         splitView.isVertical = splitState.orientation == .horizontal
