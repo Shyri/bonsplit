@@ -1145,18 +1145,26 @@ struct TabBarView: View {
                 leftFadeWidth: canScrollLeft ? fadeWidth : 0,
                 rightFadeWidth: snapshot.contentFadeWidth,
                 rightOcclusionWidth: snapshot.contentOcclusionWidth,
-                actionLaneSeparatorWidth: snapshot.drawsActionLaneSeparator
-                    ? snapshot.actionLaneGeometry.separatorTotalWidth
-                    : 0
+                actionLaneSeparatorFadeWidth: snapshot.drawsActionLaneSeparator
+                    ? snapshot.actionLaneGeometry.separatorFadeWidth
+                    : 0,
+                actionLaneSeparatorSolidWidth: snapshot.drawsActionLaneSeparator
+                    ? snapshot.actionLaneGeometry.backgroundSolidWidth
+                    : 0,
+                actionLaneSeparatorFadeRampStartFraction: snapshot.backdropFadeRampStartFraction
             )
         }
         return TabBarSelectionChromeMask(
             leftFadeWidth: canScrollLeft ? fadeWidth : 0,
             rightFadeWidth: canScrollRight ? fadeWidth : 0,
             rightOcclusionWidth: 0,
-            actionLaneSeparatorWidth: snapshot.drawsActionLaneSeparator
-                ? snapshot.actionLaneGeometry.separatorTotalWidth
-                : 0
+            actionLaneSeparatorFadeWidth: snapshot.drawsActionLaneSeparator
+                ? snapshot.actionLaneGeometry.separatorFadeWidth
+                : 0,
+            actionLaneSeparatorSolidWidth: snapshot.drawsActionLaneSeparator
+                ? snapshot.actionLaneGeometry.backgroundSolidWidth
+                : 0,
+            actionLaneSeparatorFadeRampStartFraction: snapshot.backdropFadeRampStartFraction
         )
     }
 

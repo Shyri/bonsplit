@@ -5,7 +5,9 @@ struct TabBarSelectionChromeMask: Equatable {
     let leftFadeWidth: CGFloat
     let rightFadeWidth: CGFloat
     let rightOcclusionWidth: CGFloat
-    let actionLaneSeparatorWidth: CGFloat
+    let actionLaneSeparatorFadeWidth: CGFloat
+    let actionLaneSeparatorSolidWidth: CGFloat
+    let actionLaneSeparatorFadeRampStartFraction: CGFloat
 }
 
 struct TabBarSelectionChromeView: NSViewRepresentable {
@@ -49,7 +51,9 @@ struct TabBarSelectionChromeView: NSViewRepresentable {
             leftFadeWidth: 0,
             rightFadeWidth: 0,
             rightOcclusionWidth: 0,
-            actionLaneSeparatorWidth: 0
+            actionLaneSeparatorFadeWidth: 0,
+            actionLaneSeparatorSolidWidth: 0,
+            actionLaneSeparatorFadeRampStartFraction: 0
         )
 
         override var isFlipped: Bool { true }
@@ -98,19 +102,43 @@ struct TabBarSelectionChromeView: NSViewRepresentable {
                 )).fill()
             }
 
-            let actionLaneStartX = max(
-                bounds.minX,
-                bounds.maxX - max(0, mask.actionLaneSeparatorWidth)
+            let solidWidth = max(0, mask.actionLaneSeparatorSolidWidth)
+            let solidMinX = max(bounds.minX, bounds.maxX - solidWidth)
+            let solidIntersection = NSIntersectionRect(
+                NSRect(x: solidMinX, y: separatorY, width: solidWidth, height: 1),
+                NSRect(x: selectedMinX, y: separatorY, width: selectedMaxX - selectedMinX, height: 1)
             )
-            let fallbackMinX = max(selectedMinX, actionLaneStartX)
-            let fallbackMaxX = min(selectedMaxX, bounds.maxX)
-            if fallbackMaxX > fallbackMinX {
-                NSBezierPath(rect: NSRect(
-                    x: fallbackMinX,
-                    y: separatorY,
-                    width: fallbackMaxX - fallbackMinX,
-                    height: 1
-                )).fill()
+            if !solidIntersection.isEmpty {
+                NSBezierPath(rect: solidIntersection).fill()
+            }
+
+            let fadeWidth = max(0, mask.actionLaneSeparatorFadeWidth)
+            let fadeFrame = NSRect(
+                x: solidMinX - fadeWidth,
+                y: separatorY,
+                width: fadeWidth,
+                height: 1
+            )
+            let fadeIntersection = NSIntersectionRect(
+                fadeFrame,
+                NSRect(x: selectedMinX, y: separatorY, width: selectedMaxX - selectedMinX, height: 1)
+            )
+            if !fadeIntersection.isEmpty {
+                let clearSeparator = separatorColor.withAlphaComponent(0)
+                let rampStart = min(
+                    max(0, mask.actionLaneSeparatorFadeRampStartFraction),
+                    0.95
+                )
+                let gradient = NSGradient(
+                    colorsAndLocations:
+                        (clearSeparator, 0),
+                        (clearSeparator, rampStart),
+                        (separatorColor, 1)
+                )
+                NSGraphicsContext.saveGraphicsState()
+                NSBezierPath(rect: fadeIntersection).addClip()
+                gradient?.draw(in: fadeFrame, angle: 0)
+                NSGraphicsContext.restoreGraphicsState()
             }
         }
 
