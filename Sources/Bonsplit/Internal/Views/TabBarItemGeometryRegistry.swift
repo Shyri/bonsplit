@@ -1,6 +1,11 @@
 import AppKit
 import SwiftUI
 
+@MainActor
+protocol TabBarItemGeometryObserving: AnyObject {
+    func tabBarItemGeometryDidChange()
+}
+
 /// AppKit-owned geometry for the tab strip.
 ///
 /// Tab frames stay in the platform view hierarchy and are queried only by
@@ -9,9 +14,15 @@ import SwiftUI
 @MainActor
 final class TabBarItemGeometryRegistry {
     private let itemViews = NSMapTable<NSUUID, NSView>.strongToWeakObjects()
-    private let observers = NSHashTable<NSView>.weakObjects()
+    private let observers = NSHashTable<AnyObject>.weakObjects()
     private weak var scrollView: NSScrollView?
-    private var scrollBoundsObservation: NSKeyValueObservation?
+    private var scrollBoundsObserver: NSObjectProtocol?
+
+    deinit {
+        if let scrollBoundsObserver {
+            NotificationCenter.default.removeObserver(scrollBoundsObserver)
+        }
+    }
 
     func register(_ view: NSView, for tabId: UUID) {
         itemViews.setObject(view, forKey: tabId as NSUUID)
@@ -24,27 +35,35 @@ final class TabBarItemGeometryRegistry {
         invalidateObservers()
     }
 
-    func registerObserver(_ view: NSView) {
-        observers.add(view)
-        view.needsDisplay = true
+    func registerObserver(_ observer: TabBarItemGeometryObserving) {
+        observers.add(observer)
+        observer.tabBarItemGeometryDidChange()
     }
 
-    func unregisterObserver(_ view: NSView) {
-        observers.remove(view)
+    func unregisterObserver(_ observer: TabBarItemGeometryObserving) {
+        observers.remove(observer)
     }
 
     func attachScrollView(_ scrollView: NSScrollView?) {
         guard self.scrollView !== scrollView else { return }
-        scrollBoundsObservation = nil
+        if let scrollBoundsObserver {
+            NotificationCenter.default.removeObserver(scrollBoundsObserver)
+            self.scrollBoundsObserver = nil
+        }
         self.scrollView = scrollView
         guard let clipView = scrollView?.contentView else {
             invalidateObservers()
             return
         }
 
-        // NSClipView exposes scroll movement through KVO; keeping that signal in
-        // AppKit lets chrome redraw without publishing geometry into SwiftUI.
-        scrollBoundsObservation = clipView.observe(\.bounds, options: [.new]) { [weak self] _, _ in
+        // Keep the documented AppKit scroll signal outside SwiftUI so chrome
+        // redraws do not publish geometry into the view graph.
+        clipView.postsBoundsChangedNotifications = true
+        scrollBoundsObserver = NotificationCenter.default.addObserver(
+            forName: NSView.boundsDidChangeNotification,
+            object: clipView,
+            queue: .main
+        ) { [weak self] _ in
             MainActor.assumeIsolated {
                 self?.invalidateObservers()
             }
@@ -77,9 +96,8 @@ final class TabBarItemGeometryRegistry {
     }
 
     private func invalidateObservers() {
-        for observer in observers.allObjects {
-            observer.needsDisplay = true
-            observer.needsLayout = true
+        for case let observer as TabBarItemGeometryObserving in observers.allObjects {
+            observer.tabBarItemGeometryDidChange()
         }
     }
 

@@ -2765,7 +2765,7 @@ struct TabBarDragZoneView: NSViewRepresentable {
         nsView.onDoubleClick = onDoubleClick
     }
 
-    final class DragNSView: NSView {
+    final class DragNSView: NSView, TabBarItemGeometryObserving {
         var hitRegion = HitRegion.entireBounds {
             didSet {
                 unregisterGeometryObserver(from: oldValue)
@@ -2806,6 +2806,10 @@ struct TabBarDragZoneView: NSViewRepresentable {
 
         override func layout() {
             super.layout()
+            invalidateWindowDragCursorRects()
+        }
+
+        func tabBarItemGeometryDidChange() {
             invalidateWindowDragCursorRects()
         }
 

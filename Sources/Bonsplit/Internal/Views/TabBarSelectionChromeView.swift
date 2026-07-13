@@ -42,7 +42,7 @@ struct TabBarSelectionChromeView: NSViewRepresentable {
         view.needsDisplay = true
     }
 
-    final class ChromeNSView: NSView {
+    final class ChromeNSView: NSView, TabBarItemGeometryObserving {
         weak var geometryRegistry: TabBarItemGeometryRegistry?
         var selectedTabId: UUID?
         var indicatorColor: NSColor = .controlAccentColor
@@ -61,6 +61,10 @@ struct TabBarSelectionChromeView: NSViewRepresentable {
 
         override func hitTest(_ point: NSPoint) -> NSView? {
             nil
+        }
+
+        func tabBarItemGeometryDidChange() {
+            needsDisplay = true
         }
 
         override func draw(_ dirtyRect: NSRect) {
@@ -104,10 +108,18 @@ struct TabBarSelectionChromeView: NSViewRepresentable {
 
             let solidWidth = max(0, mask.actionLaneSeparatorSolidWidth)
             let solidMinX = max(bounds.minX, bounds.maxX - solidWidth)
-            let solidIntersection = NSIntersectionRect(
-                NSRect(x: solidMinX, y: separatorY, width: solidWidth, height: 1),
-                NSRect(x: selectedMinX, y: separatorY, width: selectedMaxX - selectedMinX, height: 1)
+            let selectedSeparatorFrame = NSRect(
+                x: selectedMinX,
+                y: separatorY,
+                width: selectedMaxX - selectedMinX,
+                height: 1
             )
+            let solidIntersection = NSRect(
+                x: solidMinX,
+                y: separatorY,
+                width: solidWidth,
+                height: 1
+            ).intersection(selectedSeparatorFrame)
             if !solidIntersection.isEmpty {
                 NSBezierPath(rect: solidIntersection).fill()
             }
@@ -119,10 +131,7 @@ struct TabBarSelectionChromeView: NSViewRepresentable {
                 width: fadeWidth,
                 height: 1
             )
-            let fadeIntersection = NSIntersectionRect(
-                fadeFrame,
-                NSRect(x: selectedMinX, y: separatorY, width: selectedMaxX - selectedMinX, height: 1)
-            )
+            let fadeIntersection = fadeFrame.intersection(selectedSeparatorFrame)
             if !fadeIntersection.isEmpty {
                 let clearSeparator = separatorColor.withAlphaComponent(0)
                 let rampStart = min(
@@ -148,20 +157,57 @@ struct TabBarSelectionChromeView: NSViewRepresentable {
             frame.size.width = max(0, frame.width - TabBarMetrics.activeIndicatorTrailingInset)
             frame.size.height = TabBarMetrics.activeIndicatorHeight
 
-            let clipMinX = min(bounds.maxX, bounds.minX + max(0, mask.leftFadeWidth))
-            let rightInset = max(0, mask.rightFadeWidth) + max(0, mask.rightOcclusionWidth)
-            let clipMaxX = max(bounds.minX, bounds.maxX - rightInset)
-            guard clipMaxX > clipMinX else { return }
-
-            NSGraphicsContext.saveGraphicsState()
-            NSBezierPath(rect: NSRect(
-                x: clipMinX,
+            let leftFadeFrame = NSRect(
+                x: bounds.minX,
                 y: bounds.minY,
-                width: clipMaxX - clipMinX,
+                width: min(bounds.width, max(0, mask.leftFadeWidth)),
                 height: bounds.height
-            )).addClip()
-            indicatorColor.setFill()
+            )
+            let rightFadeMaxX = max(
+                bounds.minX,
+                bounds.maxX - max(0, mask.rightOcclusionWidth)
+            )
+            let rightFadeFrame = NSRect(
+                x: max(bounds.minX, rightFadeMaxX - max(0, mask.rightFadeWidth)),
+                y: bounds.minY,
+                width: min(max(0, mask.rightFadeWidth), rightFadeMaxX - bounds.minX),
+                height: bounds.height
+            )
+            let solidFrame = NSRect(
+                x: leftFadeFrame.maxX,
+                y: bounds.minY,
+                width: max(0, rightFadeFrame.minX - leftFadeFrame.maxX),
+                height: bounds.height
+            )
+
+            drawIndicatorSegment(frame.intersection(solidFrame), color: indicatorColor)
+            drawIndicatorFade(
+                in: frame.intersection(leftFadeFrame),
+                gradientFrame: leftFadeFrame,
+                colors: [indicatorColor.withAlphaComponent(0), indicatorColor]
+            )
+            drawIndicatorFade(
+                in: frame.intersection(rightFadeFrame),
+                gradientFrame: rightFadeFrame,
+                colors: [indicatorColor, indicatorColor.withAlphaComponent(0)]
+            )
+        }
+
+        private func drawIndicatorSegment(_ frame: NSRect, color: NSColor) {
+            guard !frame.isEmpty else { return }
+            color.setFill()
             NSBezierPath(rect: frame).fill()
+        }
+
+        private func drawIndicatorFade(
+            in frame: NSRect,
+            gradientFrame: NSRect,
+            colors: [NSColor]
+        ) {
+            guard !frame.isEmpty, gradientFrame.width > 0 else { return }
+            NSGraphicsContext.saveGraphicsState()
+            NSBezierPath(rect: frame).addClip()
+            NSGradient(colors: colors)?.draw(in: gradientFrame, angle: 0)
             NSGraphicsContext.restoreGraphicsState()
         }
     }

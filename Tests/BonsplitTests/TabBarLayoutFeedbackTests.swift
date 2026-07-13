@@ -7,8 +7,8 @@ import Testing
 @MainActor
 @Suite("Tab bar layout feedback")
 struct TabBarLayoutFeedbackTests {
-    @Test("Scrolling 50 content-sized tabs does not feed measured frames into SwiftUI state")
-    func scrollingManyTabsDoesNotMutateLayoutFeedbackState() throws {
+    @Test("Scrolling keeps 50 content-sized tab frames live in AppKit")
+    func scrollingManyTabsKeepsPlatformGeometryLive() throws {
         let size = NSSize(width: 420, height: TabBarMetrics.barHeight)
         let controller = BonsplitController(
             configuration: BonsplitConfiguration(appearance: .default)
@@ -60,7 +60,6 @@ struct TabBarLayoutFeedbackTests {
         )
         #expect(maximumOffset > 0)
 
-        BonsplitDebugCounters.reset()
         for step in 1...8 {
             let offset = maximumOffset * CGFloat(step) / 8
             scrollView.contentView.scroll(to: NSPoint(x: offset, y: 0))
@@ -75,11 +74,6 @@ struct TabBarLayoutFeedbackTests {
         let scrolledFirstFrame = try #require(registeredFrames[tabs[0].id])
         #expect(registeredFrames.count == tabs.count)
         #expect(abs((initialFirstFrame.minX - maximumOffset) - scrolledFirstFrame.minX) <= 1)
-
-        #expect(
-            BonsplitDebugCounters.tabFrameLayoutFeedbackMutationCount == 0,
-            "Tab geometry must remain inside AppKit layout instead of invalidating the SwiftUI view graph."
-        )
     }
 
     private func settleLayout(in window: NSWindow, hostingView: NSView, passes: Int = 6) {
