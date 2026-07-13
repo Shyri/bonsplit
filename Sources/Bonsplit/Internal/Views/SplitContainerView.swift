@@ -282,6 +282,9 @@ struct SplitContainerView<Content: View, EmptyContent: View>: NSViewRepresentabl
 
         context.coordinator.splitView = splitView
         let internalController = controller
+        context.coordinator.isTreeDragSessionActive = { [weak internalController] in
+            (internalController?.activeDividerDragSessions ?? 0) > 0
+        }
         splitView.onDividerDragSession = { [weak coordinator = context.coordinator, weak internalController] active in
             // The coordinator leads on both edges. At begin it arms isDragging
             // before any delegate reacts to the session. At end it delivers the
@@ -506,6 +509,12 @@ struct SplitContainerView<Content: View, EmptyContent: View>: NSViewRepresentabl
         (splitView as? ThemedSplitView)?.customDividerHitExpansion = appearance.dividerHitExpansion
         (splitView as? ThemedSplitView)?.stampedInternalController = controller
         (splitView as? ThemedSplitView)?.stampedSplitId = splitState.id
+        // Re-install alongside the identity stamps above so a reused
+        // coordinator keeps answering for the tree it currently renders.
+        let internalController = controller
+        context.coordinator.isTreeDragSessionActive = { [weak internalController] in
+            (internalController?.activeDividerDragSessions ?? 0) > 0
+        }
 
         // Update orientation if changed
         splitView.isVertical = splitState.orientation == .horizontal
@@ -698,6 +707,11 @@ struct SplitContainerView<Content: View, EmptyContent: View>: NSViewRepresentabl
         /// Retry a few turns so entry animations are not dropped on first layout.
         var initialDividerApplyAttempts = 0
         var onGeometryChange: ((_ isDragging: Bool) -> Void)?
+        /// Answers whether a divider drag session is live anywhere in this
+        /// tree. Consulted before every imposed apply: mid-drag the user owns
+        /// the divider, so an apply refuses and stays armed instead of moving
+        /// it under the pointer. Installed from makeNSView/updateNSView.
+        var isTreeDragSessionActive: (() -> Bool)?
         /// Track last applied position to detect external changes
         var lastAppliedPosition: CGFloat = 0.5
         /// What the last imposed apply actually produced, and how big the
@@ -903,6 +917,9 @@ struct SplitContainerView<Content: View, EmptyContent: View>: NSViewRepresentabl
                   let imposed = splitState.imposedFirstExtent,
                   splitView.arrangedSubviews.count >= 2
             else { return }
+            // Refuse mid-drag without consuming budget: the chain resumes
+            // from syncPosition when the session-end renudge lands.
+            if isTreeDragSessionActive?() == true { return }
             imposedRetryBudget -= 1
             let target = clampedDividerPosition(imposed, in: splitView)
             let current = splitState.orientation == .horizontal
@@ -1027,6 +1044,17 @@ struct SplitContainerView<Content: View, EmptyContent: View>: NSViewRepresentabl
             // exact points and mirrors the resulting fraction back into the
             // model for readers.
             if let imposed = splitState.imposedFirstExtent {
+                // While a drag session owns a divider anywhere in this tree,
+                // an imposed apply refuses outright: no divider write, no
+                // memo or epoch bookkeeping, no retry-budget consumption.
+                // Every imposed-apply trigger funnels through here (fresh
+                // impositions via syncDividerNow, drift renudges, descendant
+                // renudges), so this is the single gate that keeps a
+                // main-queue apply from yanking the divider out from under
+                // the pointer mid-gesture. The pending extent stays armed;
+                // the internal controller's session-end renudge re-runs this
+                // sync once the user's hand is off the divider.
+                if isTreeDragSessionActive?() == true { return }
                 guard splitView.arrangedSubviews.count >= 2 else { return }
                 let available = splitAvailableSize(in: splitView)
                 guard available > 0 else { return }
@@ -1098,6 +1126,12 @@ struct SplitContainerView<Content: View, EmptyContent: View>: NSViewRepresentabl
                     } else {
                         imposedRetryBudget = 0
                     }
+                } else if imposedRetryBudget > 0 {
+                    // A retry chain the drag-session gate interrupted parked
+                    // here with budget left; the session-end renudge lands in
+                    // this sync, so pick the chain back up.
+                    imposedRetrySplitView = splitView
+                    scheduleImposedRetry()
                 }
                 mirrorImposedOutcome(lastImposedOutcome ?? current, in: splitView)
                 return

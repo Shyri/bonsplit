@@ -3599,6 +3599,93 @@ final class BonsplitTests: XCTestCase {
         )
     }
 
+    /// While a divider drag session is live, the user owns the divider: an
+    /// imposed extent arriving mid-session must not move it. The imposition
+    /// stays armed instead, and the session's end applies it with no fresh
+    /// impose call from the host.
+    @MainActor
+    func testImposeDuringDragSessionDefersUntilSessionEnds() throws {
+        var configuration = BonsplitConfiguration()
+        configuration.appearance.minimumPaneWidth = 1
+        configuration.appearance.minimumPaneHeight = 1
+        configuration.appearance.enableAnimations = false
+        configuration.dividerPositionRange = 0...1
+        let controller = BonsplitController(configuration: configuration)
+        _ = controller.createTab(title: "Left")
+        let sourcePane = try XCTUnwrap(controller.focusedPaneId)
+        XCTAssertNotNil(controller.splitPane(
+            sourcePane,
+            orientation: .horizontal,
+            initialDividerPosition: 0.5
+        ))
+        guard case .split(let split) = controller.treeSnapshot() else {
+            XCTFail("Expected split root")
+            return
+        }
+        let splitId = try XCTUnwrap(UUID(uuidString: split.id))
+
+        let hostingView = NSHostingView(
+            rootView: BonsplitView(controller: controller) { _, _ in
+                Color.clear
+            } emptyPane: { _ in
+                Color.clear
+            }
+        )
+        let window = NSWindow(
+            contentRect: NSRect(x: 0, y: 0, width: 400, height: 300),
+            styleMask: [.titled, .closable],
+            backing: .buffered,
+            defer: false
+        )
+        defer { window.orderOut(nil) }
+        let contentView = try XCTUnwrap(window.contentView)
+        hostingView.frame = contentView.bounds
+        hostingView.autoresizingMask = [.width, .height]
+        contentView.addSubview(hostingView)
+        window.makeKeyAndOrderFront(nil)
+        contentView.layoutSubtreeIfNeeded()
+        RunLoop.current.run(until: Date().addingTimeInterval(0.05))
+        contentView.layoutSubtreeIfNeeded()
+        let splitView = try XCTUnwrap(firstDescendant(ofType: NSSplitView.self, in: hostingView))
+        XCTAssertEqual(splitView.arrangedSubviews.count, 2)
+
+        let widthBeforeImpose = splitView.arrangedSubviews[0].frame.width
+        let imposed = CGFloat(120)
+        XCTAssertGreaterThan(
+            abs(widthBeforeImpose - imposed),
+            20,
+            "the imposed extent must differ from the current divider for this test to mean anything"
+        )
+
+        controller.noteDividerDragSession(true)
+        XCTAssertTrue(controller.setImposedFirstExtent(imposed, forSplit: splitId))
+        for _ in 0..<6 {
+            splitView.layoutSubtreeIfNeeded()
+            RunLoop.current.run(until: Date().addingTimeInterval(0.02))
+            contentView.layoutSubtreeIfNeeded()
+        }
+        XCTAssertEqual(
+            splitView.arrangedSubviews[0].frame.width,
+            widthBeforeImpose,
+            accuracy: 1.5,
+            "an imposed extent must not move the divider while a drag session is live"
+        )
+
+        controller.noteDividerDragSession(false)
+        for _ in 0..<12 {
+            splitView.layoutSubtreeIfNeeded()
+            RunLoop.current.run(until: Date().addingTimeInterval(0.02))
+            contentView.layoutSubtreeIfNeeded()
+            if abs(splitView.arrangedSubviews[0].frame.width - imposed) <= 1 { break }
+        }
+        XCTAssertEqual(
+            splitView.arrangedSubviews[0].frame.width,
+            imposed,
+            accuracy: 1.5,
+            "the armed extent must apply once the session closes, with no fresh impose call"
+        )
+    }
+
     @MainActor
     func testTranslucentSplitWrappersStayClear() {
         let appearance = BonsplitConfiguration.Appearance(

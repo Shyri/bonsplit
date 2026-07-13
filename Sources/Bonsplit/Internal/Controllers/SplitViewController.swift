@@ -87,6 +87,17 @@ final class SplitViewController {
         let isActive = activeDividerDragSessions > 0
         if wasActive != isActive {
             onDividerDragSessionChange?(isActive)
+            if !isActive {
+                // Imposed applies refuse while a session is live and stay
+                // armed. Give every still-imposed split one deferred apply
+                // now that the drag released the divider — no epoch bump, so
+                // a split already at its target just refreshes its memos.
+                // The split that was dragged cleared its imposition when the
+                // gesture took ownership, so it skips itself here.
+                for split in allSplits where split.imposedFirstExtent != nil {
+                    split.syncDividerNow?()
+                }
+            }
         }
     }
 
