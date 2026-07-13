@@ -340,10 +340,12 @@ struct SplitContainerView<Content: View, EmptyContent: View>: NSViewRepresentabl
             // fraction seeded a divider a half-cell or more off its imposed
             // target, and every subsequent pass fought over the difference.
             if splitState.imposedFirstExtent != nil {
+                if animationOrigin != nil, shouldAnimate {
+                    context.coordinator.isAnimating = false
+                }
                 context.coordinator.syncPosition(splitState.dividerPosition, in: splitView)
                 if animationOrigin != nil, shouldAnimate {
                     splitView.arrangedSubviews.indices.forEach { splitView.arrangedSubviews[$0].isHidden = false }
-                    context.coordinator.isAnimating = false
                 }
                 return
             }
