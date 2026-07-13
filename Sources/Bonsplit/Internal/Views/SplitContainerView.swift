@@ -808,6 +808,16 @@ struct SplitContainerView<Content: View, EmptyContent: View>: NSViewRepresentabl
             }
         }
 
+        private func mirrorImposedOutcome(_ outcome: CGFloat, in splitView: NSSplitView) {
+            let available = splitAvailableSize(in: splitView)
+            guard available > 0 else { return }
+            let mirrored = outcome / available
+            if abs(splitState.dividerPosition - mirrored) > 0.000_1 {
+                splitState.dividerPosition = mirrored
+            }
+            lastAppliedPosition = mirrored
+        }
+
         private func retryImposedIfStillShort() {
             guard imposedRetryBudget > 0,
                   let splitView = imposedRetrySplitView,
@@ -821,12 +831,14 @@ struct SplitContainerView<Content: View, EmptyContent: View>: NSViewRepresentabl
                 : splitView.arrangedSubviews[0].frame.height
             guard abs(current - target) > 0.01 else {
                 imposedRetryBudget = 0
+                mirrorImposedOutcome(current, in: splitView)
                 return
             }
             setPositionSafely(target, in: splitView, layout: true)
             lastImposedOutcome = splitState.orientation == .horizontal
                 ? splitView.arrangedSubviews[0].frame.width
                 : splitView.arrangedSubviews[0].frame.height
+            mirrorImposedOutcome(lastImposedOutcome ?? current, in: splitView)
 #if DEBUG
             dlog(
                 "bonsplit.impose.retry split=\(String(splitState.id.uuidString.prefix(5)))"
@@ -960,11 +972,7 @@ struct SplitContainerView<Content: View, EmptyContent: View>: NSViewRepresentabl
                         imposedRetryBudget = 0
                     }
                 }
-                let mirrored = target / available
-                if abs(splitState.dividerPosition - mirrored) > 0.000_1 {
-                    splitState.dividerPosition = mirrored
-                }
-                lastAppliedPosition = mirrored
+                mirrorImposedOutcome(lastImposedOutcome ?? current, in: splitView)
                 return
             }
 
