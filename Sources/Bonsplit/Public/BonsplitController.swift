@@ -124,6 +124,14 @@ public final class BonsplitController {
             if active {
                 self.delegate?.splitTabBarDividerDragDidBegin(self)
             } else {
+                // Drag-end promises the settled geometry has already been
+                // reported when dragDidEnd runs. Deliver it here, on the
+                // session's zero crossing, and force it past the external-
+                // update suppression window: a quick flick can release
+                // within that window's ~50ms of a fromExternal call, and
+                // the gate would silently swallow the one notification the
+                // contract guarantees.
+                self.notifyGeometryChange(force: true)
                 self.delegate?.splitTabBarDividerDragDidEnd(self)
             }
         }
@@ -1118,9 +1126,14 @@ public final class BonsplitController {
     }
 
     /// Notify geometry change to delegate (internal use)
-    /// - Parameter isDragging: Whether the change is due to active divider dragging
-    internal func notifyGeometryChange(isDragging: Bool = false) {
-        guard !internalController.isExternalUpdateInProgress else { return }
+    /// - Parameters:
+    ///   - isDragging: Whether the change is due to active divider dragging
+    ///   - force: Deliver even inside the external-update suppression window.
+    ///     Only the drag-end path passes true: its notification is the one
+    ///     the delegate contract guarantees, so the anti-echo gate must not
+    ///     swallow it.
+    internal func notifyGeometryChange(isDragging: Bool = false, force: Bool = false) {
+        guard force || !internalController.isExternalUpdateInProgress else { return }
 
         // If dragging, check if delegate wants notifications during drag
         if isDragging {

@@ -85,7 +85,9 @@ public protocol BonsplitDelegate: AnyObject {
     /// The divider drag session ended (mouse released). Delivered from the
     /// tracking lifecycle itself, so it fires even when no resize callback
     /// coincides with the release; the final geometry has already been
-    /// reported through `didChangeGeometry`.
+    /// reported through `didChangeGeometry`. That report is delivered even
+    /// inside the brief suppression window a `fromExternal` update opens, so
+    /// a release right after an external echo cannot lose it.
     func splitTabBarDividerDragDidEnd(_ controller: BonsplitController)
 }
 

@@ -286,13 +286,14 @@ struct SplitContainerView<Content: View, EmptyContent: View>: NSViewRepresentabl
             (internalController?.activeDividerDragSessions ?? 0) > 0
         }
         splitView.onDividerDragSession = { [weak coordinator = context.coordinator, weak internalController] active in
-            // The coordinator leads on both edges. At begin it arms isDragging
-            // before any delegate reacts to the session. At end it delivers the
-            // final geometry notification before the counter drops and the
-            // delegate hears drag-end: the delegate contract promises the
-            // settled geometry has already been reported when drag-end runs.
-            // Hosts that suppress geometry callbacks while the session is live
-            // lose nothing — the model is final by then, and drag-end is the
+            // The coordinator arms isDragging at begin, before any delegate
+            // reacts to the session. At end the counter's zero crossing
+            // delivers the final geometry notification — forced past the
+            // external-update suppression window — before the delegate hears
+            // drag-end: the delegate contract promises the settled geometry
+            // has already been reported when drag-end runs. Hosts that
+            // suppress geometry callbacks while the session is live lose
+            // nothing — the model is final by then, and drag-end is the
             // signal to read it.
             if active {
                 coordinator?.dividerDragSessionChanged(true)
@@ -790,21 +791,18 @@ struct SplitContainerView<Content: View, EmptyContent: View>: NSViewRepresentabl
 
         /// Deterministic drag session, bracketed by `ThemedSplitView.mouseDown`
         /// around AppKit's divider tracking loop. Begin arms the drag before
-        /// any resize callback needs to infer it; end always fires at release
-        /// and delivers the drag-end geometry notification — whether or not a
-        /// final resize callback coincided with the mouseUp. The model itself
-        /// is maintained by the resize callbacks during the drag; end only has
-        /// to announce that the user's hand is off the divider.
+        /// any resize callback needs to infer it; end always fires at release.
+        /// The model itself is maintained by the resize callbacks during the
+        /// drag; the guaranteed drag-end geometry notification is delivered by
+        /// the internal controller's zero crossing right after this — from
+        /// there it bypasses the external-update suppression window, which
+        /// would otherwise swallow a release landing within ~50ms of a
+        /// fromExternal call.
         func dividerDragSessionChanged(_ active: Bool) {
 #if DEBUG
             dlog("divider.session split=\(String(splitState.id.uuidString.prefix(5))) \(active ? "begin" : "end")")
 #endif
-            if active {
-                isDragging = true
-                return
-            }
-            isDragging = false
-            onGeometryChange?(false)
+            isDragging = active
         }
 
         private func splitTotalSize(in splitView: NSSplitView) -> CGFloat {

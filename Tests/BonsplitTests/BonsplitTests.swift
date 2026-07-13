@@ -146,6 +146,28 @@ final class BonsplitTests: XCTestCase {
         }
     }
 
+    private final class DividerDragEventRecorder: BonsplitDelegate {
+        enum Event: Equatable {
+            case dragBegan
+            case dragEnded
+            case geometryChanged
+        }
+
+        var events: [Event] = []
+
+        func splitTabBarDividerDragDidBegin(_ controller: BonsplitController) {
+            events.append(.dragBegan)
+        }
+
+        func splitTabBarDividerDragDidEnd(_ controller: BonsplitController) {
+            events.append(.dragEnded)
+        }
+
+        func splitTabBar(_ controller: BonsplitController, didChangeGeometry snapshot: LayoutSnapshot) {
+            events.append(.geometryChanged)
+        }
+    }
+
     private final class ObservationInvalidationFlag: @unchecked Sendable {
         var didInvalidate = false
     }
@@ -3683,6 +3705,49 @@ final class BonsplitTests: XCTestCase {
             imposed,
             accuracy: 1.5,
             "the armed extent must apply once the session closes, with no fresh impose call"
+        )
+    }
+
+    /// Drag-end promises the settled geometry has already been reported when
+    /// `splitTabBarDividerDragDidEnd` runs. A `fromExternal` update opens a
+    /// short suppression window for outgoing geometry notifications; a
+    /// session that ends inside that window (a quick flick released right
+    /// after the host echoed a position) must still get its final
+    /// `didChangeGeometry`, and get it before drag-end.
+    @MainActor
+    func testDragEndGeometryBypassesExternalUpdateSuppression() throws {
+        let controller = BonsplitController(configuration: BonsplitConfiguration(
+            appearance: .init(enableAnimations: false)
+        ))
+        let recorder = DividerDragEventRecorder()
+        controller.delegate = recorder
+        _ = controller.createTab(title: "Base")
+        let sourcePane = try XCTUnwrap(controller.focusedPaneId)
+        XCTAssertNotNil(controller.splitPane(
+            sourcePane,
+            orientation: .horizontal,
+            initialDividerPosition: 0.5
+        ))
+        guard case .split(let split) = controller.treeSnapshot() else {
+            XCTFail("Expected split root")
+            return
+        }
+        let splitId = try XCTUnwrap(UUID(uuidString: split.id))
+
+        recorder.events.removeAll()
+        controller.noteDividerDragSession(true)
+        XCTAssertEqual(recorder.events, [.dragBegan])
+
+        // The external echo lands, then the session ends immediately — well
+        // inside the suppression window the external update opened.
+        XCTAssertTrue(controller.setDividerPosition(0.45, forSplit: splitId, fromExternal: true))
+        recorder.events.removeAll()
+        controller.noteDividerDragSession(false)
+
+        XCTAssertEqual(
+            recorder.events,
+            [.geometryChanged, .dragEnded],
+            "session end must deliver the final geometry, ahead of drag-end, even while an external update suppresses notifications"
         )
     }
 
