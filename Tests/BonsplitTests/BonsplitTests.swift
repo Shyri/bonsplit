@@ -3119,7 +3119,7 @@ final class BonsplitTests: XCTestCase {
     }
 
     @MainActor
-    func testSplitButtonBackdropOccludesTabChromeAtContentFadeStart() {
+    func testSplitButtonBackdropOccludesTabBodyAtContentFadeStart() {
         guard let saturation = renderedSplitButtonContentFadeStartSaturation() else {
             XCTFail("Expected rendered split button content fade colors")
             return
@@ -4449,9 +4449,9 @@ final class BonsplitTests: XCTestCase {
             let laneStartX = size.width - splitButtonLaneWidth
             let sampleRect = NSRect(
                 x: laneStartX - contentFadeWidth + 2,
-                y: 0,
+                y: TabBarMetrics.activeIndicatorHeight + 2,
                 width: 8,
-                height: 4
+                height: 8
             )
             return maximumSaturation(in: hostingView, sampleRect: sampleRect)
         }
