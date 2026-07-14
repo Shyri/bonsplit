@@ -138,6 +138,82 @@ final class TabBarResizeAnchorTests: XCTestCase {
         )
     }
 
+    func testSelectingTabBehindActionLaneRevealsItsCloseAffordance() throws {
+        let harness = try makeTabBarHarness(
+            initialSize: NSSize(width: 520, height: TabBarMetrics.barHeight),
+            tabCount: 4,
+            selectedIndex: 0,
+            showSplitButtons: true
+        )
+        defer { harness.window.orderOut(nil) }
+
+        let scrollView = try tabBarScrollView(in: harness.hostingView)
+        let chromeView = try XCTUnwrap(
+            descendants(
+                ofType: TabBarSelectionChromeView.ChromeNSView.self,
+                in: harness.hostingView
+            ).first
+        )
+        let targetTab = try XCTUnwrap(harness.pane.tabs.last)
+        let actionLaneWidth = TabBarStyling.splitButtonsBackdropWidth(
+            buttonCount: BonsplitConfiguration.SplitActionButton.defaults.count
+        )
+        let unobscuredMaxX = chromeView.bounds.maxX - actionLaneWidth
+
+        settleLayout(in: harness.window, hostingView: harness.hostingView) {
+            guard maxHorizontalOffset(in: scrollView) > 0,
+                  let targetFrame = chromeView.geometryRegistry?.frame(
+                    for: targetTab.id,
+                    in: chromeView
+                  ) else {
+                return false
+            }
+            return targetFrame.maxX > unobscuredMaxX + 1
+                && targetFrame.maxX <= chromeView.bounds.maxX + 0.5
+        }
+
+        let obscuredFrame = try XCTUnwrap(
+            chromeView.geometryRegistry?.frame(for: targetTab.id, in: chromeView)
+        )
+        XCTAssertGreaterThan(
+            obscuredFrame.maxX,
+            unobscuredMaxX + 1,
+            "The regression requires the target tab's trailing close affordance to begin behind the action lane."
+        )
+        XCTAssertLessThanOrEqual(
+            obscuredFrame.maxX,
+            chromeView.bounds.maxX + 0.5,
+            "The target must still be inside the raw clip view so the test distinguishes occlusion from ordinary clipping."
+        )
+        let initialOffset = scrollView.contentView.bounds.origin.x
+
+        harness.pane.selectTab(targetTab.id)
+        settleLayout(in: harness.window, hostingView: harness.hostingView) {
+            guard chromeView.selectedTabId == targetTab.id,
+                  let selectedFrame = chromeView.geometryRegistry?.frame(
+                    for: targetTab.id,
+                    in: chromeView
+                  ) else {
+                return false
+            }
+            return selectedFrame.maxX <= unobscuredMaxX + 0.5
+        }
+
+        let selectedFrame = try XCTUnwrap(
+            chromeView.geometryRegistry?.frame(for: targetTab.id, in: chromeView)
+        )
+        XCTAssertGreaterThan(
+            scrollView.contentView.bounds.origin.x,
+            initialOffset + 0.5,
+            "Selecting a tab under the action lane must shift the strip to expose its trailing controls."
+        )
+        XCTAssertLessThanOrEqual(
+            selectedFrame.maxX,
+            unobscuredMaxX + 0.5,
+            "The selected tab, including its close affordance, must end before the action lane begins."
+        )
+    }
+
     func testViewportResizeKeepsLeadingAnchoredWhenTabStripWasLeadingAligned() throws {
         let harness = try makeTabBarHarness(
             initialSize: NSSize(width: 900, height: TabBarMetrics.barHeight),
@@ -280,7 +356,8 @@ final class TabBarResizeAnchorTests: XCTestCase {
     private func makeTabBarHarness(
         initialSize: NSSize,
         tabCount: Int,
-        selectedIndex: Int
+        selectedIndex: Int,
+        showSplitButtons: Bool = false
     ) throws -> TabBarHarness {
         let controller = BonsplitController(configuration: BonsplitConfiguration(appearance: .default))
         controller.tabShortcutHintsEnabled = false
@@ -293,7 +370,7 @@ final class TabBarResizeAnchorTests: XCTestCase {
         pane.selectedTabId = tabs[selectedIndex].id
 
         let hostingView = NSHostingView(
-            rootView: TabBarView(pane: pane, isFocused: true, showSplitButtons: false)
+            rootView: TabBarView(pane: pane, isFocused: true, showSplitButtons: showSplitButtons)
                 .environment(controller)
                 .environment(controller.internalController)
         )
@@ -344,14 +421,19 @@ final class TabBarResizeAnchorTests: XCTestCase {
         line: UInt = #line
     ) throws -> NSScrollView {
         let matches = tabBarScrollViews(in: root)
+        let widestWidth = matches.map(\.frame.width).max()
+        let widestMatches = matches.filter { scrollView in
+            guard let widestWidth else { return false }
+            return abs(scrollView.frame.width - widestWidth) <= 0.5
+        }
         XCTAssertEqual(
-            matches.count,
+            widestMatches.count,
             1,
             "The harness should expose exactly one tab-bar-sized scroll view.",
             file: file,
             line: line
         )
-        return try XCTUnwrap(matches.first, file: file, line: line)
+        return try XCTUnwrap(widestMatches.first, file: file, line: line)
     }
 
     private func tabBarScrollViews(in root: NSView) -> [NSScrollView] {
