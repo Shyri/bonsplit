@@ -29,15 +29,21 @@ final class TabBarItemGeometryRegistry {
     private let observers = NSHashTable<AnyObject>.weakObjects()
     private weak var scrollView: NSScrollView?
     private var scrollBoundsObserver: NSObjectProtocol?
+    private var liveScrollObserver: NSObjectProtocol?
     private var documentFrameObserver: NSObjectProtocol?
     private var documentBoundsObserver: NSObjectProtocol?
     private var selectedTabId: UUID?
+    private var lastObservedSelectedTabDocumentFrame: CGRect?
     private var pendingScrollIntent: ScrollIntent?
+    private var expectedProgrammaticOffset: CGFloat?
     private var trailingObscuredWidth: CGFloat = 0
 
     deinit {
         if let scrollBoundsObserver {
             NotificationCenter.default.removeObserver(scrollBoundsObserver)
+        }
+        if let liveScrollObserver {
+            NotificationCenter.default.removeObserver(liveScrollObserver)
         }
         if let documentFrameObserver {
             NotificationCenter.default.removeObserver(documentFrameObserver)
@@ -49,6 +55,9 @@ final class TabBarItemGeometryRegistry {
 
     func register(_ view: NSView, for tabId: UUID) {
         itemViews.setObject(view, forKey: tabId as NSUUID)
+        if tabId == selectedTabId {
+            reconcilePendingScrollIntent()
+        }
         invalidateObservers()
     }
 
@@ -73,6 +82,10 @@ final class TabBarItemGeometryRegistry {
             NotificationCenter.default.removeObserver(scrollBoundsObserver)
             self.scrollBoundsObserver = nil
         }
+        if let liveScrollObserver {
+            NotificationCenter.default.removeObserver(liveScrollObserver)
+            self.liveScrollObserver = nil
+        }
         if let documentFrameObserver {
             NotificationCenter.default.removeObserver(documentFrameObserver)
             self.documentFrameObserver = nil
@@ -81,6 +94,8 @@ final class TabBarItemGeometryRegistry {
             NotificationCenter.default.removeObserver(documentBoundsObserver)
             self.documentBoundsObserver = nil
         }
+        expectedProgrammaticOffset = nil
+        lastObservedSelectedTabDocumentFrame = nil
         self.scrollView = scrollView
         makeScrollStackTransparent(scrollView)
         guard let clipView = scrollView?.contentView else {
@@ -97,7 +112,16 @@ final class TabBarItemGeometryRegistry {
             queue: .main
         ) { [weak self] _ in
             MainActor.assumeIsolated {
-                self?.invalidateObservers()
+                self?.scrollBoundsDidChange()
+            }
+        }
+        liveScrollObserver = NotificationCenter.default.addObserver(
+            forName: NSScrollView.willStartLiveScrollNotification,
+            object: scrollView,
+            queue: .main
+        ) { [weak self] _ in
+            MainActor.assumeIsolated {
+                self?.userWillScroll()
             }
         }
         if let documentView = scrollView?.documentView {
@@ -112,12 +136,19 @@ final class TabBarItemGeometryRegistry {
                 documentView: documentView
             )
         }
+        if let selectedTabId {
+            pendingScrollIntent = .revealSelectedTab(selectedTabId)
+        }
         invalidateObservers()
+        reconcilePendingScrollIntent()
         enforceLeadingEdgeIfContentFits()
     }
 
     /// Records the selected tab as a viewport intent until live AppKit geometry can satisfy it.
     func revealSelection(_ tabId: UUID?) {
+        if selectedTabId != tabId {
+            lastObservedSelectedTabDocumentFrame = nil
+        }
         selectedTabId = tabId
         pendingScrollIntent = tabId.map(ScrollIntent.revealSelectedTab) ?? .leading
         reconcilePendingScrollIntent()
@@ -172,9 +203,42 @@ final class TabBarItemGeometryRegistry {
 
     func geometryDidChange(for tabId: UUID) {
         if tabId == selectedTabId {
+            if selectedTabFrameDidChange(tabId) {
+                pendingScrollIntent = .revealSelectedTab(tabId)
+            }
             reconcilePendingScrollIntent()
         }
         invalidateObservers()
+    }
+
+    private func scrollBoundsDidChange() {
+        if let expectedProgrammaticOffset,
+           let metrics = currentScrollMetrics(),
+           abs(metrics.offset - expectedProgrammaticOffset) > 0.5 {
+            setHorizontalOffset(expectedProgrammaticOffset, metrics: metrics)
+        }
+        invalidateObservers()
+    }
+
+    private func userWillScroll() {
+        expectedProgrammaticOffset = nil
+        pendingScrollIntent = nil
+    }
+
+    private func selectedTabFrameDidChange(_ tabId: UUID) -> Bool {
+        guard let scrollView,
+              let documentView = scrollView.documentView,
+              let itemView = itemViews.object(forKey: tabId as NSUUID),
+              itemView.window === scrollView.window,
+              isVisibleInHierarchy(itemView) else {
+            return false
+        }
+
+        let currentFrame = itemView.convert(itemView.bounds, to: documentView)
+        defer { lastObservedSelectedTabDocumentFrame = currentFrame }
+        guard let previousFrame = lastObservedSelectedTabDocumentFrame else { return true }
+        return abs(currentFrame.minX - previousFrame.minX) > 0.5
+            || abs(currentFrame.maxX - previousFrame.maxX) > 0.5
     }
 
     private func reconcilePendingScrollIntent() {
@@ -239,6 +303,7 @@ final class TabBarItemGeometryRegistry {
               itemFrame.maxX <= metrics.documentWidth + 0.5 else {
             return false
         }
+        lastObservedSelectedTabDocumentFrame = itemFrame
 
         if TabBarStyling.shouldKeepLeadingAligned(
             contentWidth: metrics.documentWidth,
@@ -251,6 +316,7 @@ final class TabBarItemGeometryRegistry {
         let visibleRange = metrics.offset...(metrics.offset + metrics.unobscuredViewportWidth)
         guard itemFrame.minX < visibleRange.lowerBound - 0.5
                 || itemFrame.maxX > visibleRange.upperBound + 0.5 else {
+            setHorizontalOffset(metrics.offset, metrics: metrics)
             return true
         }
 
@@ -288,9 +354,12 @@ final class TabBarItemGeometryRegistry {
     }
 
     private func setHorizontalOffset(_ targetOffset: CGFloat, metrics: ScrollMetrics) {
-        guard abs(targetOffset - metrics.offset) > 0.5, let scrollView else { return }
+        let maximumOffset = max(0, metrics.documentWidth - metrics.viewportWidth)
+        let clampedOffset = min(max(targetOffset, 0), maximumOffset)
+        expectedProgrammaticOffset = clampedOffset
+        guard abs(clampedOffset - metrics.offset) > 0.5, let scrollView else { return }
         let clipView = scrollView.contentView
-        clipView.scroll(to: NSPoint(x: targetOffset, y: clipView.bounds.origin.y))
+        clipView.scroll(to: NSPoint(x: clampedOffset, y: clipView.bounds.origin.y))
         scrollView.reflectScrolledClipView(clipView)
     }
 

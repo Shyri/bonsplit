@@ -4215,6 +4215,10 @@ final class BonsplitTests: XCTestCase {
                 XCTFail("Expected tab bar scroll view for manual scroll regression")
                 return nil
             }
+            NotificationCenter.default.post(
+                name: NSScrollView.willStartLiveScrollNotification,
+                object: scrollView
+            )
             scrollView.contentView.scroll(to: NSPoint(x: 96, y: 0))
             scrollView.reflectScrolledClipView(scrollView.contentView)
             hostingView.layoutSubtreeIfNeeded()

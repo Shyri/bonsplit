@@ -386,6 +386,10 @@ final class TabBarResizeAnchorTests: XCTestCase {
         DispatchQueue.main.async {
             let validOffset = self.maxHorizontalOffset(in: scrollView) / 2
             laterValidOffset = validOffset
+            NotificationCenter.default.post(
+                name: NSScrollView.willStartLiveScrollNotification,
+                object: scrollView
+            )
             scrollView.contentView.scroll(to: NSPoint(x: validOffset, y: 0))
             scrollView.reflectScrolledClipView(scrollView.contentView)
             laterScrollApplied.fulfill()
