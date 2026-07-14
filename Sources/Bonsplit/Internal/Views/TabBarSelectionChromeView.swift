@@ -186,15 +186,11 @@ struct TabBarSelectionChromeView: NSViewRepresentable {
                 gradientFrame: leftFadeFrame,
                 colors: [indicatorColor.withAlphaComponent(0), indicatorColor]
             )
-            // An action-lane fade removes tab content before foreground controls begin.
-            // Keep the indicator out of that region; ordinary scroll edges still fade it.
-            if mask.rightOcclusionWidth == 0 {
-                drawIndicatorFade(
-                    in: frame.intersection(rightFadeFrame),
-                    gradientFrame: rightFadeFrame,
-                    colors: [indicatorColor, indicatorColor.withAlphaComponent(0)]
-                )
-            }
+            drawIndicatorFade(
+                in: frame.intersection(rightFadeFrame),
+                gradientFrame: rightFadeFrame,
+                colors: [indicatorColor, indicatorColor.withAlphaComponent(0)]
+            )
         }
 
         private func drawIndicatorSegment(_ frame: NSRect, color: NSColor) {

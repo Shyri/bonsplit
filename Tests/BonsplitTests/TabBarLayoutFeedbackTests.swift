@@ -58,6 +58,10 @@ final class TabBarLayoutFeedbackTests: XCTestCase {
         )
         XCTAssertGreaterThan(maximumOffset, 0)
 
+        NotificationCenter.default.post(
+            name: NSScrollView.willStartLiveScrollNotification,
+            object: scrollView
+        )
         for step in 1...8 {
             let offset = maximumOffset * CGFloat(step) / 8
             scrollView.contentView.scroll(to: NSPoint(x: offset, y: 0))

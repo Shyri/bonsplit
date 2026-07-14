@@ -137,175 +137,6 @@ private struct SplitButtonLaneWidthReader: View {
     }
 }
 
-@MainActor
-private final class TabBarScrollViewBridge {
-    private struct ScrollMetrics {
-        let offset: CGFloat
-        let documentWidth: CGFloat
-        let viewportWidth: CGFloat
-    }
-
-    private enum AsyncCorrection {
-        case fixedTarget
-        case clampToValidRange
-    }
-
-    weak var scrollView: NSScrollView?
-
-    func attach(_ scrollView: NSScrollView?) {
-        self.scrollView = scrollView
-        enforceLeadingEdgeIfContentFits(reason: "attach")
-    }
-
-    private func currentMetrics() -> ScrollMetrics? {
-        guard let scrollView else { return nil }
-
-        let clipView = scrollView.contentView
-        let documentWidth = max(
-            scrollView.documentView?.frame.width ?? 0,
-            scrollView.documentView?.bounds.width ?? 0
-        )
-        let viewportWidth = clipView.bounds.width
-        return ScrollMetrics(
-            offset: clipView.bounds.origin.x,
-            documentWidth: documentWidth,
-            viewportWidth: viewportWidth
-        )
-    }
-
-    func shouldPreferLeadingTarget(
-        selectedTabId: UUID?,
-        fallbackContentWidth: CGFloat,
-        fallbackContainerWidth: CGFloat
-    ) -> Bool {
-        guard selectedTabId != nil else { return true }
-
-        if let metrics = currentMetrics(), metrics.viewportWidth > 0 {
-            return TabBarStyling.shouldKeepLeadingAligned(
-                contentWidth: metrics.documentWidth,
-                containerWidth: metrics.viewportWidth
-            )
-        }
-
-        return TabBarStyling.shouldKeepLeadingAligned(
-            contentWidth: fallbackContentWidth,
-            containerWidth: fallbackContainerWidth
-        )
-    }
-
-    func enforceLeadingEdgeIfContentFits(reason: String) {
-        guard let metrics = currentMetrics(), metrics.viewportWidth > 0 else { return }
-        guard TabBarStyling.shouldKeepLeadingAligned(
-            contentWidth: metrics.documentWidth,
-            containerWidth: metrics.viewportWidth
-        ) else {
-            return
-        }
-
-        resetToLeadingEdgeIfNeeded(reason: reason)
-    }
-
-    func preserveCurrentOffsetAfterLayoutChange(reason: String) {
-        guard let metrics = currentMetrics(), metrics.viewportWidth > 0 else { return }
-        guard !TabBarStyling.shouldKeepLeadingAligned(
-            contentWidth: metrics.documentWidth,
-            containerWidth: metrics.viewportWidth
-        ) else {
-            resetToLeadingEdgeIfNeeded(reason: reason)
-            return
-        }
-
-        let maxOffset = max(0, metrics.documentWidth - metrics.viewportWidth)
-        let clampedOffset = min(max(metrics.offset, 0), maxOffset)
-        setHorizontalOffset(
-            clampedOffset,
-            reason: reason,
-            event: "tab.bar.clampOffset",
-            asyncEvent: "tab.bar.clampOffset.async",
-            metrics: metrics,
-            asyncCorrection: .clampToValidRange
-        )
-    }
-
-    func resetToLeadingEdgeIfNeeded(reason: String) {
-        guard let metrics = currentMetrics() else { return }
-
-        let currentOffset = metrics.offset
-        guard abs(currentOffset) > 0.5 else { return }
-
-        setHorizontalOffset(
-            0,
-            reason: reason,
-            event: "tab.bar.resetLeading",
-            asyncEvent: "tab.bar.resetLeading.async",
-            metrics: metrics,
-            asyncCorrection: .fixedTarget
-        )
-    }
-
-    private func setHorizontalOffset(
-        _ targetOffset: CGFloat,
-        reason: String,
-        event: String,
-        asyncEvent: String,
-        metrics: ScrollMetrics,
-        asyncCorrection: AsyncCorrection
-    ) {
-        guard abs(targetOffset - metrics.offset) > 0.5 else { return }
-        guard let scrollView else { return }
-
-#if DEBUG
-        dlog(
-            "\(event) reason=\(reason) " +
-            "offset=\(Int(metrics.offset.rounded())) " +
-            "target=\(Int(targetOffset.rounded())) " +
-            "doc=\(Int(metrics.documentWidth.rounded())) " +
-            "viewport=\(Int(metrics.viewportWidth.rounded()))"
-        )
-#endif
-        let clipView = scrollView.contentView
-        clipView.scroll(to: NSPoint(x: targetOffset, y: clipView.bounds.origin.y))
-        scrollView.reflectScrolledClipView(clipView)
-
-        // SwiftUI's ScrollView can briefly restore the stale offset during the same
-        // layout cycle. Re-apply the correction on the next turn to keep split-pane
-        // tab bars pinned or clamped once the geometry settles.
-        DispatchQueue.main.async { [weak scrollView] in
-            guard let scrollView else { return }
-            let clipView = scrollView.contentView
-            let asyncOffset = clipView.bounds.origin.x
-            let asyncDocumentWidth = max(
-                scrollView.documentView?.frame.width ?? 0,
-                scrollView.documentView?.bounds.width ?? 0
-            )
-            let asyncViewportWidth = clipView.bounds.width
-            let asyncTargetOffset: CGFloat
-
-            switch asyncCorrection {
-            case .fixedTarget:
-                asyncTargetOffset = targetOffset
-            case .clampToValidRange:
-                guard asyncViewportWidth > 0 else { return }
-                let asyncMaxOffset = max(0, asyncDocumentWidth - asyncViewportWidth)
-                asyncTargetOffset = min(max(asyncOffset, 0), asyncMaxOffset)
-            }
-
-            guard abs(asyncOffset - asyncTargetOffset) > 0.5 else { return }
-#if DEBUG
-            dlog(
-                "\(asyncEvent) reason=\(reason) " +
-                "offset=\(Int(asyncOffset.rounded())) " +
-                "target=\(Int(asyncTargetOffset.rounded())) " +
-                "doc=\(Int(asyncDocumentWidth.rounded())) " +
-                "viewport=\(Int(asyncViewportWidth.rounded()))"
-            )
-#endif
-            clipView.scroll(to: NSPoint(x: asyncTargetOffset, y: clipView.bounds.origin.y))
-            scrollView.reflectScrolledClipView(clipView)
-        }
-    }
-}
-
 enum TabBarStyling {
     struct SplitActionSystemImage: Equatable {
         let name: String
@@ -396,11 +227,6 @@ enum TabBarStyling {
         return tabFrames[selectedTabId]
     }
 
-    enum ScrollTarget: Equatable {
-        case leading
-        case selectedTab(UUID)
-    }
-
     static func separatorSegments(
         totalWidth: CGFloat,
         gap: ClosedRange<CGFloat>?
@@ -432,23 +258,6 @@ enum TabBarStyling {
         return isMinimalMode ? 0 : splitButtonsBackdropWidth(buttonCount: buttonCount)
     }
 
-    static func preferredScrollTarget(
-        selectedTabId: UUID?,
-        contentWidth: CGFloat,
-        containerWidth: CGFloat
-    ) -> ScrollTarget {
-        guard let selectedTabId else { return .leading }
-
-        // When the tab strip fits without horizontal scrolling, centering the selected tab
-        // can strand empty NSClipView space at the leading edge in split panes. Keep the
-        // content snapped to the leading edge until it actually overflows.
-        guard !shouldKeepLeadingAligned(contentWidth: contentWidth, containerWidth: containerWidth) else {
-            return .leading
-        }
-
-        return .selectedTab(selectedTabId)
-    }
-
     static func shouldKeepLeadingAligned(
         contentWidth: CGFloat,
         containerWidth: CGFloat
@@ -457,18 +266,6 @@ enum TabBarStyling {
         return contentWidth <= containerWidth + overflowThreshold
     }
 
-    static func shouldForceResetToLeading(
-        scrollOffset: CGFloat,
-        contentWidth: CGFloat,
-        containerWidth: CGFloat
-    ) -> Bool {
-        guard shouldKeepLeadingAligned(contentWidth: contentWidth, containerWidth: containerWidth) else {
-            return false
-        }
-
-        let overflowThreshold: CGFloat = 1
-        return abs(scrollOffset) > overflowThreshold
-    }
 }
 
 struct TabBarLayout: Equatable {
@@ -1020,7 +817,6 @@ struct TabBarView: View {
     @State private var splitButtonContentWidth: CGFloat = 0
     @State private var splitButtonViewportWidth: CGFloat = 0
     @State private var controlKeyMonitor = TabControlShortcutKeyMonitor()
-    @State private var scrollViewBridge = TabBarScrollViewBridge()
     @State private var tabItemGeometryRegistry = TabBarItemGeometryRegistry()
 
     private var canScrollLeft: Bool {
@@ -1119,10 +915,6 @@ struct TabBarView: View {
 
     private var trailingTabContentInset: CGFloat {
         tabBarLayout.trailingTabContentInset
-    }
-
-    private var leadingScrollAnchorId: String {
-        "tab-bar-leading-\(pane.id.id.uuidString)"
     }
 
     private var splitButtonScrollCoordinateSpaceName: String {
@@ -1249,42 +1041,6 @@ struct TabBarView: View {
         return true
     }
 
-    private func scrollToPreferredTarget(_ proxy: ScrollViewProxy, selectedTabId: UUID?) {
-        let target: TabBarStyling.ScrollTarget
-        if scrollViewBridge.shouldPreferLeadingTarget(
-            selectedTabId: selectedTabId,
-            fallbackContentWidth: contentWidth,
-            fallbackContainerWidth: containerWidth
-        ) {
-            target = .leading
-        } else if let selectedTabId {
-            target = .selectedTab(selectedTabId)
-        } else {
-            target = .leading
-        }
-
-        withTransaction(Transaction(animation: nil)) {
-            switch target {
-            case .leading:
-                proxy.scrollTo(leadingScrollAnchorId, anchor: .leading)
-            case .selectedTab(let tabId):
-                proxy.scrollTo(tabId, anchor: .center)
-            }
-        }
-
-        if target == .leading,
-           TabBarStyling.shouldForceResetToLeading(
-                scrollOffset: scrollOffset,
-                contentWidth: contentWidth,
-                containerWidth: containerWidth
-           ) {
-            scrollViewBridge.resetToLeadingEdgeIfNeeded(reason: "scrollToPreferredTarget")
-        } else if target == .leading {
-            scrollViewBridge.enforceLeadingEdgeIfContentFits(reason: "scrollToPreferredTarget")
-        }
-    }
-
-
     /// The horizontally-scrolling tab row hosted inside the tab strip's `ScrollView`.
     ///
     /// Extracted from `body` so the SwiftUI type-checker can resolve the surrounding
@@ -1293,10 +1049,6 @@ struct TabBarView: View {
     @ViewBuilder
     private var tabScrollContent: some View {
         HStack(spacing: TabBarMetrics.tabSpacing) {
-            Color.clear
-                .frame(width: 0, height: tabBarHeight)
-                .id(leadingScrollAnchorId)
-
             ForEach(visibleTabEntries, id: \.tab.id) { entry in
                 tabItem(for: entry.tab, at: entry.index)
                     .id(entry.tab.id)
@@ -1338,17 +1090,9 @@ struct TabBarView: View {
             }
             // Scrollable tabs with fade overlays
             GeometryReader { containerGeo in
-                ScrollViewReader { proxy in
-                    ScrollView(.horizontal, showsIndicators: false) {
-                        tabScrollContent
-                    }
-                    .background(
-                        TabBarScrollViewResolver { scrollView in
-                            scrollViewBridge.attach(scrollView)
-                            tabItemGeometryRegistry.attachScrollView(scrollView)
-                        }
-                        .frame(width: 0, height: 0)
-                    )
+                ScrollView(.horizontal, showsIndicators: false) {
+                    tabScrollContent
+                }
                     // When the tab strip is shorter than the visible area, place a single
                     // drag zone over both the empty trailing space AND the 30pt inline
                     // dropZoneAfterTabs (extended leftward by 30pt). The inline zone's
@@ -1378,21 +1122,21 @@ struct TabBarView: View {
                             ))
                         }
                     }
-                    .coordinateSpace(name: "tabScroll")
-                    .onAppear {
-                        containerWidth = containerGeo.size.width
-                        scrollToPreferredTarget(proxy, selectedTabId: pane.selectedTabId)
-                    }
-                    .onChange(of: containerGeo.size.width) { _, newWidth in
-                        containerWidth = newWidth
-                        scrollViewBridge.preserveCurrentOffsetAfterLayoutChange(reason: "containerWidth")
-                    }
-                    .onChange(of: contentWidth) { _, _ in
-                        scrollViewBridge.preserveCurrentOffsetAfterLayoutChange(reason: "contentWidth")
-                    }
-                    .onChange(of: pane.selectedTabId) { _, newTabId in
-                        scrollToPreferredTarget(proxy, selectedTabId: newTabId)
-                    }
+                .coordinateSpace(name: "tabScroll")
+                .onAppear {
+                    containerWidth = containerGeo.size.width
+                    tabItemGeometryRegistry.setTrailingObscuredWidth(trailingTabContentInset)
+                    tabItemGeometryRegistry.revealSelection(pane.selectedTabId)
+                }
+                .onChange(of: containerGeo.size.width) { _, newWidth in
+                    containerWidth = newWidth
+                    tabItemGeometryRegistry.viewportLayoutDidChange()
+                }
+                .onChange(of: pane.selectedTabId) { _, newTabId in
+                    tabItemGeometryRegistry.revealSelection(newTabId)
+                }
+                .onChange(of: trailingTabContentInset) { _, newWidth in
+                    tabItemGeometryRegistry.setTrailingObscuredWidth(newWidth)
                 }
                 .frame(height: tabBarHeight)
                 .mask(combinedMask)
@@ -3059,68 +2803,6 @@ struct TabBarDragZoneView: NSViewRepresentable {
             case "Minimize": window.miniaturize(nil)
             default: window.zoom(nil)
             }
-        }
-    }
-}
-
-private struct TabBarScrollViewResolver: NSViewRepresentable {
-    let onResolve: (NSScrollView?) -> Void
-
-    func makeNSView(context: Context) -> ResolverView {
-        let view = ResolverView()
-        view.onResolve = onResolve
-        return view
-    }
-
-    func updateNSView(_ nsView: ResolverView, context: Context) {
-        nsView.onResolve = onResolve
-        nsView.resolveScrollView()
-    }
-
-    final class ResolverView: NSView {
-        var onResolve: ((NSScrollView?) -> Void)?
-
-        override func viewDidMoveToSuperview() {
-            super.viewDidMoveToSuperview()
-            resolveScrollView()
-        }
-
-        override func viewDidMoveToWindow() {
-            super.viewDidMoveToWindow()
-            resolveScrollView()
-        }
-
-        override func layout() {
-            super.layout()
-            resolveScrollView()
-        }
-
-        func resolveScrollView() {
-            DispatchQueue.main.async { [weak self] in
-                guard let self else { return }
-                let scrollView = self.enclosingScrollView
-                self.makeScrollStackTransparent(scrollView)
-                onResolve?(scrollView)
-            }
-        }
-
-        private func makeScrollStackTransparent(_ scrollView: NSScrollView?) {
-            scrollView?.drawsBackground = false
-            scrollView?.backgroundColor = .clear
-            scrollView?.wantsLayer = true
-            scrollView?.layer?.backgroundColor = NSColor.clear.cgColor
-            scrollView?.layer?.isOpaque = false
-
-            let clipView = scrollView?.contentView
-            clipView?.drawsBackground = false
-            clipView?.backgroundColor = .clear
-            clipView?.wantsLayer = true
-            clipView?.layer?.backgroundColor = NSColor.clear.cgColor
-            clipView?.layer?.isOpaque = false
-
-            scrollView?.documentView?.wantsLayer = true
-            scrollView?.documentView?.layer?.backgroundColor = NSColor.clear.cgColor
-            scrollView?.documentView?.layer?.isOpaque = false
         }
     }
 }
