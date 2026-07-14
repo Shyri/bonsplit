@@ -1125,6 +1125,7 @@ struct TabBarView: View {
                 .coordinateSpace(name: "tabScroll")
                 .onAppear {
                     containerWidth = containerGeo.size.width
+                    tabItemGeometryRegistry.setTrailingObscuredWidth(trailingTabContentInset)
                     tabItemGeometryRegistry.revealSelection(pane.selectedTabId)
                 }
                 .onChange(of: containerGeo.size.width) { _, newWidth in
@@ -1133,6 +1134,9 @@ struct TabBarView: View {
                 }
                 .onChange(of: pane.selectedTabId) { _, newTabId in
                     tabItemGeometryRegistry.revealSelection(newTabId)
+                }
+                .onChange(of: trailingTabContentInset) { _, newWidth in
+                    tabItemGeometryRegistry.setTrailingObscuredWidth(newWidth)
                 }
                 .frame(height: tabBarHeight)
                 .mask(combinedMask)

@@ -17,6 +17,7 @@ final class TabBarItemGeometryRegistry {
         let offset: CGFloat
         let documentWidth: CGFloat
         let viewportWidth: CGFloat
+        let unobscuredViewportWidth: CGFloat
     }
 
     private enum ScrollIntent: Equatable {
@@ -32,6 +33,7 @@ final class TabBarItemGeometryRegistry {
     private var documentBoundsObserver: NSObjectProtocol?
     private var selectedTabId: UUID?
     private var pendingScrollIntent: ScrollIntent?
+    private var trailingObscuredWidth: CGFloat = 0
 
     deinit {
         if let scrollBoundsObserver {
@@ -119,6 +121,17 @@ final class TabBarItemGeometryRegistry {
         selectedTabId = tabId
         pendingScrollIntent = tabId.map(ScrollIntent.revealSelectedTab) ?? .leading
         reconcilePendingScrollIntent()
+    }
+
+    /// Updates the portion of the clip view covered by trailing foreground controls.
+    func setTrailingObscuredWidth(_ width: CGFloat) {
+        let normalizedWidth = max(0, width)
+        guard abs(normalizedWidth - trailingObscuredWidth) > 0.5 else { return }
+
+        trailingObscuredWidth = normalizedWidth
+        pendingScrollIntent = selectedTabId.map(ScrollIntent.revealSelectedTab) ?? .leading
+        reconcilePendingScrollIntent()
+        invalidateObservers()
     }
 
     /// Preserves a resize's current anchor while keeping the clip view inside its valid range.
@@ -216,7 +229,7 @@ final class TabBarItemGeometryRegistry {
               itemView.window === scrollView.window,
               isVisibleInHierarchy(itemView),
               let metrics = currentScrollMetrics(),
-              metrics.viewportWidth > 0 else {
+              metrics.unobscuredViewportWidth > 0 else {
             return false
         }
 
@@ -235,14 +248,14 @@ final class TabBarItemGeometryRegistry {
             return true
         }
 
-        let visibleRange = metrics.offset...(metrics.offset + metrics.viewportWidth)
+        let visibleRange = metrics.offset...(metrics.offset + metrics.unobscuredViewportWidth)
         guard itemFrame.minX < visibleRange.lowerBound - 0.5
                 || itemFrame.maxX > visibleRange.upperBound + 0.5 else {
             return true
         }
 
         let maximumOffset = max(0, metrics.documentWidth - metrics.viewportWidth)
-        let centeredOffset = itemFrame.midX - (metrics.viewportWidth / 2)
+        let centeredOffset = itemFrame.midX - (metrics.unobscuredViewportWidth / 2)
         let targetOffset = min(max(centeredOffset, 0), maximumOffset)
         setHorizontalOffset(targetOffset, metrics: metrics)
         return true
@@ -258,7 +271,8 @@ final class TabBarItemGeometryRegistry {
         return ScrollMetrics(
             offset: clipView.bounds.origin.x,
             documentWidth: documentWidth,
-            viewportWidth: clipView.bounds.width
+            viewportWidth: clipView.bounds.width,
+            unobscuredViewportWidth: max(0, clipView.bounds.width - trailingObscuredWidth)
         )
     }
 
