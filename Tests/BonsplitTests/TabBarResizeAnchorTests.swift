@@ -5,6 +5,94 @@ import XCTest
 
 @MainActor
 final class TabBarResizeAnchorTests: XCTestCase {
+    func testSelectedOverflowTabTracksLiveGeometryAndFullyRevealsChrome() throws {
+        let harness = try makeTabBarHarness(
+            initialSize: NSSize(width: 520, height: TabBarMetrics.barHeight),
+            tabCount: 3,
+            selectedIndex: 0
+        )
+        defer { harness.window.orderOut(nil) }
+
+        let scrollView = try tabBarScrollView(in: harness.hostingView)
+        let chromeView = try XCTUnwrap(
+            descendants(
+                ofType: TabBarSelectionChromeView.ChromeNSView.self,
+                in: harness.hostingView
+            ).first
+        )
+        XCTAssertEqual(maxHorizontalOffset(in: scrollView), 0, accuracy: 0.5)
+        XCTAssertEqual(scrollView.contentView.bounds.origin.x, 0, accuracy: 0.5)
+
+        let newTab = TabItem(
+            title: "New browser tab",
+            icon: "globe",
+            kind: "browser"
+        )
+        harness.pane.addTab(newTab)
+
+        settleLayout(in: harness.window, hostingView: harness.hostingView) {
+            guard chromeView.selectedTabId == newTab.id,
+                  let selectedFrame = chromeView.geometryRegistry?.frame(
+                    for: newTab.id,
+                    in: chromeView
+                  ) else {
+                return false
+            }
+            return selectedFrame.minX >= chromeView.bounds.minX - 0.5
+                && selectedFrame.maxX <= chromeView.bounds.maxX + 0.5
+        }
+
+        let initialSelectedFrame = try XCTUnwrap(
+            chromeView.geometryRegistry?.frame(for: newTab.id, in: chromeView)
+        )
+        let newTabIndex = try XCTUnwrap(
+            harness.pane.tabs.firstIndex(where: { $0.id == newTab.id })
+        )
+        harness.pane.tabs[newTabIndex].title = String(repeating: "Long browser title ", count: 8)
+
+        settleLayout(in: harness.window, hostingView: harness.hostingView) {
+            guard let selectedFrame = chromeView.geometryRegistry?.frame(
+                for: newTab.id,
+                in: chromeView
+            ) else {
+                return false
+            }
+            return selectedFrame.width > initialSelectedFrame.width + 1
+                && selectedFrame.minX >= chromeView.bounds.minX - 0.5
+                && selectedFrame.maxX <= chromeView.bounds.maxX + 0.5
+        }
+
+        let selectedFrame = try XCTUnwrap(
+            chromeView.geometryRegistry?.frame(for: newTab.id, in: chromeView)
+        )
+        XCTAssertEqual(chromeView.selectedTabId, newTab.id)
+        XCTAssertGreaterThan(
+            selectedFrame.width,
+            initialSelectedFrame.width + 1,
+            "The regression requires the selected browser tab's live frame to grow."
+        )
+        XCTAssertGreaterThan(
+            maxHorizontalOffset(in: scrollView),
+            0,
+            "The test must transition the tab strip from fitting to overflowing."
+        )
+        XCTAssertGreaterThan(
+            scrollView.contentView.bounds.origin.x,
+            0,
+            "Selecting a newly inserted overflow tab must move the live AppKit viewport."
+        )
+        XCTAssertGreaterThanOrEqual(
+            selectedFrame.minX,
+            chromeView.bounds.minX - 0.5,
+            "The selected tab and its selection chrome must not be clipped at the leading edge."
+        )
+        XCTAssertLessThanOrEqual(
+            selectedFrame.maxX,
+            chromeView.bounds.maxX + 0.5,
+            "The selected tab and its selection chrome must not be clipped at the trailing edge."
+        )
+    }
+
     func testViewportResizeKeepsLeadingAnchoredWhenTabStripWasLeadingAligned() throws {
         let harness = try makeTabBarHarness(
             initialSize: NSSize(width: 900, height: TabBarMetrics.barHeight),
@@ -112,6 +200,7 @@ final class TabBarResizeAnchorTests: XCTestCase {
     private struct TabBarHarness {
         let window: NSWindow
         let hostingView: NSView
+        let pane: PaneState
     }
 
     private func makeTabBarHarness(
@@ -154,7 +243,7 @@ final class TabBarResizeAnchorTests: XCTestCase {
             tabBarScrollViews(in: hostingView).count == 1
         }
 
-        return TabBarHarness(window: window, hostingView: hostingView)
+        return TabBarHarness(window: window, hostingView: hostingView, pane: pane)
     }
 
     private func settleLayout(
