@@ -5,6 +5,69 @@ import XCTest
 
 @MainActor
 final class TabBarResizeAnchorTests: XCTestCase {
+    func testPendingSelectionReconcilesWhenScrollViewAttaches() throws {
+        let harness = try makeGeometryRegistryHarness()
+        defer { harness.window.orderOut(nil) }
+
+        harness.registry.register(harness.selectedView, for: harness.selectedTabId)
+        harness.registry.revealSelection(harness.selectedTabId)
+        XCTAssertEqual(harness.scrollView.contentView.bounds.origin.x, 0, accuracy: 0.5)
+
+        harness.registry.attachScrollView(harness.scrollView)
+
+        XCTAssertGreaterThan(
+            harness.scrollView.contentView.bounds.origin.x,
+            0,
+            "Attaching live AppKit geometry must resume a selected-tab reveal that was pending before the scroll view existed."
+        )
+    }
+
+    func testProgrammaticRevealSurvivesLaterBoundsOriginRestoration() throws {
+        let harness = try makeGeometryRegistryHarness()
+        defer { harness.window.orderOut(nil) }
+
+        harness.registry.attachScrollView(harness.scrollView)
+        harness.registry.register(harness.selectedView, for: harness.selectedTabId)
+        harness.registry.revealSelection(harness.selectedTabId)
+        let revealedOffset = harness.scrollView.contentView.bounds.origin.x
+        XCTAssertGreaterThan(revealedOffset, 0)
+
+        harness.scrollView.contentView.scroll(to: .zero)
+        harness.scrollView.reflectScrolledClipView(harness.scrollView.contentView)
+
+        XCTAssertEqual(
+            harness.scrollView.contentView.bounds.origin.x,
+            revealedOffset,
+            accuracy: 0.5,
+            "A later SwiftUI bounds-origin restoration must not overwrite the registry's selected-tab reveal."
+        )
+    }
+
+    func testLiveUserScrollRelinquishesProgrammaticOffsetOwnership() throws {
+        let harness = try makeGeometryRegistryHarness()
+        defer { harness.window.orderOut(nil) }
+
+        harness.registry.attachScrollView(harness.scrollView)
+        harness.registry.register(harness.selectedView, for: harness.selectedTabId)
+        harness.registry.revealSelection(harness.selectedTabId)
+        XCTAssertGreaterThan(harness.scrollView.contentView.bounds.origin.x, 0)
+
+        NotificationCenter.default.post(
+            name: NSScrollView.willStartLiveScrollNotification,
+            object: harness.scrollView
+        )
+        let userOffset: CGFloat = 120
+        harness.scrollView.contentView.scroll(to: NSPoint(x: userOffset, y: 0))
+        harness.scrollView.reflectScrolledClipView(harness.scrollView.contentView)
+
+        XCTAssertEqual(
+            harness.scrollView.contentView.bounds.origin.x,
+            userOffset,
+            accuracy: 0.5,
+            "An intentional live user scroll must replace any earlier programmatic reveal target."
+        )
+    }
+
     func testSelectedOverflowTabTracksLiveGeometryAndFullyRevealsChrome() throws {
         let harness = try makeTabBarHarness(
             initialSize: NSSize(width: 520, height: TabBarMetrics.barHeight),
@@ -351,6 +414,47 @@ final class TabBarResizeAnchorTests: XCTestCase {
         let window: NSWindow
         let hostingView: NSView
         let pane: PaneState
+    }
+
+    private struct GeometryRegistryHarness {
+        let window: NSWindow
+        let scrollView: NSScrollView
+        let selectedView: NSView
+        let selectedTabId: UUID
+        let registry: TabBarItemGeometryRegistry
+    }
+
+    private func makeGeometryRegistryHarness() throws -> GeometryRegistryHarness {
+        let viewportSize = NSSize(width: 200, height: TabBarMetrics.barHeight)
+        let window = NSWindow(
+            contentRect: NSRect(origin: .zero, size: viewportSize),
+            styleMask: [.titled, .closable],
+            backing: .buffered,
+            defer: false
+        )
+        let contentView = try XCTUnwrap(window.contentView)
+        let scrollView = NSScrollView(frame: NSRect(origin: .zero, size: viewportSize))
+        let documentView = NSView(
+            frame: NSRect(x: 0, y: 0, width: 600, height: viewportSize.height)
+        )
+        let selectedView = NSView(
+            frame: NSRect(x: 480, y: 0, width: 100, height: viewportSize.height)
+        )
+        let selectedTabId = UUID()
+        let registry = TabBarItemGeometryRegistry()
+
+        documentView.addSubview(selectedView)
+        scrollView.documentView = documentView
+        contentView.addSubview(scrollView)
+        window.makeKeyAndOrderFront(nil)
+
+        return GeometryRegistryHarness(
+            window: window,
+            scrollView: scrollView,
+            selectedView: selectedView,
+            selectedTabId: selectedTabId,
+            registry: registry
+        )
     }
 
     private func makeTabBarHarness(
