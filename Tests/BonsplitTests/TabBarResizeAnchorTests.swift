@@ -93,6 +93,51 @@ final class TabBarResizeAnchorTests: XCTestCase {
         )
     }
 
+    func testSelectedTabStaysRevealedWhenEarlierTabGrowthMovesItsLiveFrame() throws {
+        let harness = try makeTabBarHarness(
+            initialSize: NSSize(width: 520, height: TabBarMetrics.barHeight),
+            tabCount: 4,
+            selectedIndex: 3
+        )
+        defer { harness.window.orderOut(nil) }
+
+        let scrollView = try tabBarScrollView(in: harness.hostingView)
+        let chromeView = try XCTUnwrap(
+            descendants(
+                ofType: TabBarSelectionChromeView.ChromeNSView.self,
+                in: harness.hostingView
+            ).first
+        )
+        let selectedTabId = try XCTUnwrap(harness.pane.selectedTabId)
+        XCTAssertEqual(maxHorizontalOffset(in: scrollView), 0, accuracy: 0.5)
+
+        harness.pane.tabs[0].title = String(repeating: "Long earlier title ", count: 8)
+
+        settleLayout(in: harness.window, hostingView: harness.hostingView) {
+            guard maxHorizontalOffset(in: scrollView) > 0,
+                  let selectedFrame = chromeView.geometryRegistry?.frame(
+                    for: selectedTabId,
+                    in: chromeView
+                  ) else {
+                return false
+            }
+            return scrollView.contentView.bounds.origin.x > 0
+                && selectedFrame.minX >= chromeView.bounds.minX - 0.5
+                && selectedFrame.maxX <= chromeView.bounds.maxX + 0.5
+        }
+
+        let selectedFrame = try XCTUnwrap(
+            chromeView.geometryRegistry?.frame(for: selectedTabId, in: chromeView)
+        )
+        XCTAssertGreaterThan(scrollView.contentView.bounds.origin.x, 0)
+        XCTAssertGreaterThanOrEqual(selectedFrame.minX, chromeView.bounds.minX - 0.5)
+        XCTAssertLessThanOrEqual(
+            selectedFrame.maxX,
+            chromeView.bounds.maxX + 0.5,
+            "A sibling layout change must keep scrolling and selection chrome on the same live frame."
+        )
+    }
+
     func testViewportResizeKeepsLeadingAnchoredWhenTabStripWasLeadingAligned() throws {
         let harness = try makeTabBarHarness(
             initialSize: NSSize(width: 900, height: TabBarMetrics.barHeight),
@@ -153,7 +198,36 @@ final class TabBarResizeAnchorTests: XCTestCase {
         )
     }
 
-    func testAsyncClampRetryDoesNotUndoLaterValidOffset() async throws {
+    func testContentShrinkReturnsFittingStripToLeadingEdge() throws {
+        let harness = try makeTabBarHarness(
+            initialSize: NSSize(width: 360, height: TabBarMetrics.barHeight),
+            tabCount: 8,
+            selectedIndex: 0
+        )
+        defer { harness.window.orderOut(nil) }
+
+        let scrollView = try tabBarScrollView(in: harness.hostingView)
+        let initialMaxOffset = maxHorizontalOffset(in: scrollView)
+        XCTAssertGreaterThan(initialMaxOffset, 0)
+        scrollView.contentView.scroll(to: NSPoint(x: initialMaxOffset, y: 0))
+        scrollView.reflectScrolledClipView(scrollView.contentView)
+
+        harness.pane.tabs = Array(harness.pane.tabs.prefix(2))
+        settleLayout(in: harness.window, hostingView: harness.hostingView) {
+            maxHorizontalOffset(in: scrollView) <= 0.5
+                && abs(scrollView.contentView.bounds.origin.x) <= 0.5
+        }
+
+        XCTAssertEqual(maxHorizontalOffset(in: scrollView), 0, accuracy: 0.5)
+        XCTAssertEqual(
+            scrollView.contentView.bounds.origin.x,
+            0,
+            accuracy: 0.5,
+            "A strip that stops overflowing must not retain a stale clip-view offset."
+        )
+    }
+
+    func testViewportResizeDoesNotUndoLaterValidOffset() async throws {
         let harness = try makeTabBarHarness(
             initialSize: NSSize(width: 240, height: TabBarMetrics.barHeight),
             tabCount: 8,

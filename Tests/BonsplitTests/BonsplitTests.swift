@@ -880,68 +880,6 @@ final class BonsplitTests: XCTestCase {
         XCTAssertEqual(layout.trailingTabContentInset, 0)
     }
 
-    func testTabBarKeepsNonOverflowingTabsLeadingAligned() {
-        let tabId = UUID()
-
-        XCTAssertEqual(
-            TabBarStyling.preferredScrollTarget(
-                selectedTabId: tabId,
-                contentWidth: 132,
-                containerWidth: 349
-            ),
-            .leading,
-            "When the tab strip fits in the pane, it should stay leading-aligned instead of creating a dead leading clip-view band"
-        )
-
-        XCTAssertEqual(
-            TabBarStyling.preferredScrollTarget(
-                selectedTabId: tabId,
-                contentWidth: 420,
-                containerWidth: 349
-            ),
-            .selectedTab(tabId),
-            "Overflowing tab strips should still auto-scroll the selected tab into view"
-        )
-    }
-
-    func testTabBarForcesLeadingResetWhenNonOverflowingStripStaysScrolled() {
-        XCTAssertTrue(
-            TabBarStyling.shouldForceResetToLeading(
-                scrollOffset: 28,
-                contentWidth: 180,
-                containerWidth: 349
-            ),
-            "A non-overflowing tab strip with a stale horizontal offset should be snapped back to x=0"
-        )
-
-        XCTAssertTrue(
-            TabBarStyling.shouldForceResetToLeading(
-                scrollOffset: -30,
-                contentWidth: 180,
-                containerWidth: 349
-            ),
-            "The leading reset must correct both left and right stale offsets"
-        )
-
-        XCTAssertFalse(
-            TabBarStyling.shouldForceResetToLeading(
-                scrollOffset: 0.2,
-                contentWidth: 180,
-                containerWidth: 349
-            ),
-            "Tiny floating-point drift should not trigger redundant clip-view resets"
-        )
-
-        XCTAssertFalse(
-            TabBarStyling.shouldForceResetToLeading(
-                scrollOffset: 28,
-                contentWidth: 420,
-                containerWidth: 349
-            ),
-            "Overflowing tab strips are allowed to stay horizontally scrolled"
-        )
-    }
-
     @MainActor
     func testTabBarHitRegionRegistryTracksVisibleWindowPoint() {
         let window = NSWindow(
