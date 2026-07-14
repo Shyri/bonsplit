@@ -3129,14 +3129,22 @@ final class BonsplitTests: XCTestCase {
     }
 
     @MainActor
-    func testSelectedTabIndicatorDoesNotBleedUnderSplitButtonBackdrop() {
+    func testSelectedTabIndicatorFadesWithTabContentBeforeSplitButtonBackdrop() {
         guard let brightnesses = renderedSelectedIndicatorBackdropBrightnesses() else {
             XCTFail("Expected rendered selected indicator backdrop colors")
             return
         }
 
-        XCTAssertLessThan(brightnesses.leading, 0.08)
-        XCTAssertLessThan(brightnesses.trailing, 0.08)
+        XCTAssertGreaterThan(
+            brightnesses.leading,
+            0.2,
+            "The indicator should remain visible where the selected tab begins fading under the action-lane chrome."
+        )
+        XCTAssertLessThan(
+            brightnesses.trailing,
+            brightnesses.leading - 0.1,
+            "The indicator should use the tab content's right-edge fade instead of stopping at a different x-position."
+        )
     }
 
     @MainActor
